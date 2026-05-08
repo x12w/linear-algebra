@@ -6,8 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(LinearAlgebra src/linear.cpp)
-add_library(BasicAlgebra src/basic_algebra.cpp)
-target_include_directories(BasicAlgebra PUBLIC include)
+add_library(BasicAlgebra INTERFACE)
+target_include_directories(BasicAlgebra INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(LinearAlgebra PUBLIC BasicAlgebra)
 
 add_executable(test test.cpp)

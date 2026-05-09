@@ -6,12 +6,8 @@
 #define BASIC_ALGEBRA_HPP
 
 namespace basic_algebra {
-template <typename T> class ComplexNumber;
-// 定义基本代数类型，用于定义矩阵元素，若后续需要修改元素类型，可直接替换
 // the real number type should define the following operators:
 // +, -, *, /, +=, -=, *=, /=, -(the unary operator), ==, !=
-using T = double;
-
 // the complex number type should define the following operators:
 // +, -, *, /, +=, -=, *=, /=, -(the unary operator), ==, !=
 

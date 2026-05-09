@@ -1,10 +1,8 @@
-#include <charconv>
+#include <algorithm>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdlib>
-#include <iterator>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 #ifndef LINEAR_HPP
 #define LINEAR_HPP
@@ -26,6 +24,8 @@ public:
   void check_size();
   void push_back(const ValueType &ele);
   void push_back(ValueType &&ele);
+  void insert(const std::size_t index, const ValueType &ele);
+  void insert(const Iterator it, const ValueType &ele);
 
   // constructors and copy controllers
   Vector();
@@ -90,6 +90,45 @@ template <typename T> void Vector<T>::push_back(ValueType &&ele) {
 
   allo.construct(first_free, std::move(ele));
   first_free++;
+}
+
+// the insert method assume that the index/iterator is valid :)
+template <typename T>
+void Vector<T>::insert(const std::size_t index, const ValueType &ele) {
+  // check is there enough space
+  check_size();
+
+  // construct the object at first_free
+  // then update the first_free
+  allo.construct(first_free);
+  first_free++;
+
+  // move the elements after the target element
+  for (int i = size() - 1; i > index; i--) {
+    *(base + i) = *(base + i - 1);
+  }
+
+  // insert the target element
+  *(base + index) = ele;
+}
+
+template <typename T>
+void Vector<T>::insert(const Iterator it, const ValueType &ele) {
+  // check is there enough space
+  check_size();
+
+  // construct the object at first_free
+  // then update the first_free
+  allo.construct(first_free);
+  first_free++;
+
+  // move the elements after the target element
+  for (auto i = first_free; i > it; i--) {
+    *i = *(i - 1);
+  }
+
+  // insert the target element
+  *it = ele;
 }
 
 template <typename T> Vector<T>::Vector() {

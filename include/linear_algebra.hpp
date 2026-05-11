@@ -3,11 +3,10 @@
 #include <cstdarg>
 #include <cstddef>
 #include <cstdlib>
-#include <exception>
-#include <iterator>
+#include <iostream>
+#include <istream>
 #include <memory>
-#include <random>
-#include <regex>
+#include <ostream>
 #include <stdexcept>
 #include <utility>
 #ifndef LINEAR_HPP
@@ -23,10 +22,10 @@ private:
   Iterator base, first_free, after_end;
 
 public:
-  std::size_t size() { return first_free - base; }
+  std::size_t size() const { return first_free - base; }
   void resize(std::size_t target_size);
-  std::size_t space() { return capacity; }
-  bool empty() { return size() == 0; }
+  std::size_t space() const { return capacity; }
+  bool empty() const { return size() == 0; }
   void reserve(const std::size_t target_capacity);
   void check_size();
   void push_back(const ValueType &ele);
@@ -34,6 +33,16 @@ public:
   ValueType pop_back();
   void insert(const std::size_t index, const ValueType &ele);
   void insert(const Iterator it, const ValueType &ele);
+  void clear();
+  void swap(Vector &another) {
+    std::swap(capacity, another.capacity);
+    std::swap(base, another.base);
+    std::swap(first_free, another.first_free);
+    std::swap(after_end, another.after_end);
+  }
+
+  // math methods
+  Vector cross_product(const Vector &operand) const;
 
   // constructors and copy controllers
   Vector();
@@ -47,7 +56,18 @@ public:
   Vector &operator=(Vector another);
   ValueType &operator[](std::size_t index) { return base[index]; }
   const ValueType &operator[](std::size_t index) const { return base[index]; }
-  ValueType operator*(const Vector &another);
+  ValueType operator*(const Vector &another) const;
+  Vector operator+(const Vector &operand) const;
+  Vector &operator+=(const Vector &operand);
+  Vector operator-(const Vector &operand) const;
+  Vector &operator-=(const Vector &operand);
+  Vector operator-() const;
+
+  // friends
+  template <typename U>
+  friend std::ostream &operator<<(std::ostream &os, const Vector<U> &operand);
+  template <typename U>
+  friend std::istream &operator>>(std::istream &is, Vector<U> &operand);
 };
 
 // allocate space of target_size to the Vector,
@@ -181,6 +201,29 @@ void Vector<T>::insert(const Iterator it, const ValueType &ele) {
   *it = ele;
 }
 
+template <typename T> void Vector<T>::clear() {
+  for (; first_free > base; first_free--) {
+    allo.destroy(first_free - 1);
+  }
+}
+
+template <typename T>
+auto Vector<T>::cross_product(const Vector &operand) const -> Vector {
+  // check the vector size
+  if ((size() != 3) || (operand.size() != 3)) {
+    throw(std::runtime_error("error: to do the cross product, you should make "
+                             "sure that the two vectors' size is 3"));
+  }
+
+  Vector res(3);
+
+  res[0] = (*this)[1] * operand[2] - operand[1] * (*this)[2];
+  res[1] = (*this)[2] * operand[0] - operand[2] * (*this)[0];
+  res[2] = (*this)[0] * operand[1] - operand[0] * (*this)[1];
+
+  return res;
+}
+
 template <typename T> Vector<T>::Vector() {
   base = allo.allocate(0);
   first_free = base;
@@ -239,12 +282,12 @@ template <typename T> Vector<T>::~Vector() {
 }
 
 template <typename T> Vector<T> &Vector<T>::operator=(Vector another) {
-  std::swap(*this, another);
+  swap(another);
   return *this;
 }
 
 template <typename T>
-auto Vector<T>::operator*(const Vector &another) -> ValueType {
+auto Vector<T>::operator*(const Vector &another) const -> ValueType {
   if (size() != another.size()) {
     throw(std::runtime_error(
         "error:the vector dot product need the two vector has same size"));
@@ -257,6 +300,79 @@ auto Vector<T>::operator*(const Vector &another) -> ValueType {
   return res;
 }
 
+template <typename T>
+auto Vector<T>::operator+(const Vector &operand) const -> Vector {
+  // check the vectors' size
+  if (size() != operand.size()) {
+    throw(std::runtime_error("error: to do a vector add, you should make sure "
+                             "that the two vectors' size equal"));
+  }
+
+  Vector res(*this);
+
+  for (std::size_t index = 0; index < res.size(); index++) {
+    res[index] += operand[index];
+  }
+
+  return res;
+}
+
+template <typename T>
+auto Vector<T>::operator+=(const Vector &operand) -> Vector & {
+  *this = (*this) + operand;
+  return *this;
+}
+
+template <typename T>
+auto Vector<T>::operator-(const Vector &operand) const -> Vector {
+  // check the vectors' size
+  if (size() != operand.size()) {
+    throw(std::runtime_error("error: to do a vector subtraction, you should "
+                             "make sure that the two vectors' size equal"));
+  }
+
+  Vector res(*this);
+
+  for (std::size_t index = 0; index < res.size(); index++) {
+    res[index] -= operand[index];
+  }
+
+  return res;
+}
+
+template <typename T>
+auto Vector<T>::operator-=(const Vector &operand) -> Vector & {
+  *this = (*this) - operand;
+  return *this;
+}
+
+template <typename T> auto Vector<T>::operator-() const -> Vector {
+  Vector res(size());
+  for (std::size_t index = 0; index < size(); index++) {
+    res[index] = -(*this)[index];
+  }
+  return res;
+}
+
+// friends
+
+template <typename T>
+std::ostream &operator<<(std::ostream &os, const Vector<T> &operand) {
+  for (std::size_t index = 0; index < operand.size(); index++) {
+    os << operand[index] << " ";
+  }
+
+  return os;
+}
+
+template <typename T>
+std::istream &operator>>(std::istream &is, Vector<T> &operand) {
+  for (std::size_t index = 0; index < operand.size(); index++) {
+    is >> operand[index];
+  }
+  return is;
+}
+
 // to implement the class matrix, the type T should reload the following
 // operators:
 //+, -, *, /, +=, -=, *=, /=, -(the unary operator), ==. !=, <<, >>(input and
@@ -267,9 +383,9 @@ private:
   Vector<Vector<ValueType>> matrix;
 
 public:
-  std::size_t row() { return matrix.size(); }
+  std::size_t row() const { return matrix.size(); }
 
-  std::size_t col() {
+  std::size_t col() const {
     // determine whether the matrix is empty
     if (matrix.empty()) {
       return 0;
@@ -292,15 +408,40 @@ public:
   void add_row(Vector<ValueType> &&new_row);
   void add_col();
   void add_col(const Vector<ValueType> &new_row);
+  void clear();
   Vector<ValueType> fetch_row(std::size_t row_index) const;
   Vector<ValueType> fetch_col(std::size_t col_index) const;
   Matrix get_transpose() const;
   void transpose();
-  Matrix cross_product(const Matrix &another) const;
 
   // constructors and copy controllers
   Matrix();
   Matrix(std::size_t row_size, std::size_t col_size, const ValueType &ele = 0);
+  ~Matrix() = default;
+
+  // reload operators
+  Matrix operator+(const Matrix &operand) const;
+  Matrix &operator+=(const Matrix &operand);
+  Matrix operator-(const Matrix &operand) const;
+  Matrix &operator-=(const Matrix &operand);
+  Matrix operator*(const Matrix &operand) const;
+  Matrix &operator*=(const Matrix &operand);
+  Matrix operator*(const ValueType &operand) const;
+  Matrix &operator*=(const ValueType &operand);
+  Matrix operator/(const ValueType &operand) const;
+  Matrix &operator/=(const ValueType &operand);
+  Matrix operator-() const;
+  Matrix operator^(const Matrix &operand) const;
+  Vector<ValueType> &operator[](std::size_t index) { return matrix[index]; }
+  const Vector<ValueType> &operator[](std::size_t index) const {
+    return matrix[index];
+  }
+
+  // friends
+  template <typename U>
+  friend std::ostream &operator<<(std::ostream &os, const Matrix<U> &operand);
+  template <typename U>
+  friend std::istream &operator>>(std::istream &is, Matrix<U> &operand);
 };
 
 template <typename T>
@@ -360,6 +501,8 @@ void Matrix<T>::add_col(const Vector<ValueType> &new_col) {
     matrix[i].push_back(std::move(new_col[i]));
   }
 }
+
+template <typename T> void Matrix<T>::clear() { matrix.clear(); }
 
 template <typename T>
 void Matrix<T>::resize(std::size_t row_size, std::size_t col_size) {
@@ -423,7 +566,122 @@ void Matrix<T>::forced_resize(std::size_t row_size, std::size_t col_size) {
 }
 
 template <typename T> auto Matrix<T>::get_transpose() const -> Matrix {
-  Matrix res;
+  Matrix res(col(), 0);
+
+  for (std::size_t index = 0; index < matrix.size(); index++) {
+    res.add_col(matrix[index]);
+  }
+
+  return res;
+}
+
+template <typename T> Matrix<T>::Matrix() : matrix() {}
+
+template <typename T>
+Matrix<T>::Matrix(std::size_t row_size, std::size_t col_size,
+                  const ValueType &ele)
+    : matrix(row_size, Vector<ValueType>(col_size, ele)) {}
+
+template <typename T>
+auto Matrix<T>::operator+(const Matrix &operand) const -> Matrix {
+  // check the whether the col and rol are both equal
+  if ((row() != operand.row()) || (col() != operand.col())) {
+    throw(std::runtime_error("error: to do a matrix add, you should make sure "
+                             "the two matrixes have equal size"));
+  }
+
+  Matrix res(*this);
+
+  std::cout << res << std::endl;
+
+  for (std::size_t index = 0; index < operand.row(); index++) {
+    res[index] += operand[index];
+  }
+
+  return res;
+}
+
+template <typename T>
+auto Matrix<T>::operator+=(const Matrix &operand) -> Matrix & {
+  *this = (*this) + operand;
+  return *this;
+}
+
+template <typename T>
+auto Matrix<T>::operator-(const Matrix &operand) const -> Matrix {
+  // check the matrix size
+  if ((row() != operand.row()) || (col() != operand.col())) {
+    throw(std::runtime_error("error: to do a matrix subtraction, you should "
+                             "make sure the matrixes have equal size"));
+  }
+
+  Matrix res(*this);
+
+  for (std::size_t index = 0; index < res.row(); index++) {
+    res[index] -= operand[index];
+  }
+
+  return res;
+}
+
+template <typename T>
+auto Matrix<T>::operator-=(const Matrix &operand) -> Matrix & {
+  *this = (*this) - operand;
+  return *this;
+}
+
+template <typename T>
+auto Matrix<T>::operator*(const Matrix &operand) const -> Matrix {
+  // check the matrix size
+  if (col() != operand.row()) {
+    throw(std::runtime_error(
+        "error: to do a matrix multiplication, you should make sure the first "
+        "matrix's col is equal to the second matrix's row"));
+  }
+
+  Matrix res(row(), operand.col());
+
+  for (std::size_t row_index = 0; row_index < res.row(); row_index++) {
+    for (std::size_t col_index = 0; col_index < res.col(); col_index++) {
+      res[row_index][col_index] =
+          (*this)[row_index] * operand.fetch_col(col_index);
+    }
+  }
+
+  return res;
+}
+
+template <typename T>
+auto Matrix<T>::operator*=(const Matrix &operand) -> Matrix & {
+  *this = (*this) * operand;
+  return *this;
+}
+
+template <typename T> auto Matrix<T>::operator-() const -> Matrix {
+  Matrix res(*this);
+
+  for (std::size_t index; index < res.row(); index++) {
+    res[index] = -res[index];
+  }
+
+  return res;
+}
+
+// friends
+template <typename T>
+std::ostream &operator<<(std::ostream &os, const Matrix<T> &operand) {
+  for (std::size_t index = 0; index < operand.row(); index++) {
+    os << operand.matrix[index] << std::endl;
+  }
+  return os;
+}
+
+template <typename T>
+std::istream &operator>>(std::istream &is, Matrix<T> &operand) {
+  for (std::size_t index = 0; index < operand.matrix.size(); index++) {
+    is >> operand.matrix[index];
+  }
+  return is;
 }
 
 } // namespace linear_algebra

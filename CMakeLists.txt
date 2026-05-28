@@ -7,8 +7,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(LinearAlgebra INTERFACE)
 add_library(BasicAlgebra INTERFACE)
+add_library(Utils INTERFACE)
 target_include_directories(BasicAlgebra INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(LinearAlgebra INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(Utils INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(BasicAlgebra INTERFACE Utils)
 target_link_libraries(LinearAlgebra INTERFACE BasicAlgebra)
 
 add_executable(test test.cpp)

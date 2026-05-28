@@ -1,11 +1,17 @@
+#include <algorithm>
 #include <cmath>
 #include <csignal>
+#include <cstddef>
+#include <cstdlib>
 #include <iostream>
 #include <istream>
 #include <iterator>
 #include <memory>
 #include <ostream>
+#include <pstl/glue_algorithm_impl.h>
 #include <stdexcept>
+#include <utility>
+#include <utils.hpp>
 
 #ifndef BASIC_ALGEBRA_HPP
 #define BASIC_ALGEBRA_HPP
@@ -314,7 +320,7 @@ std::istream &operator>>(std::istream &is, ComplexNumber<T> &operand) {
 }
 
 // to define the rational number type, you should provide a integer type,
-// the integer type should imlement the following operators
+// the integer type should implement the following operators
 // +, -, *, /, %, +=, -=, /=, *=, %=, -(the unary operator), ==, !=, >, >=, <,
 // <=, <<, >>(stream operator) the default interger type is int
 template <typename T = int> class RationalNumber {
@@ -478,6 +484,341 @@ std::istream &operator>>(std::istream &is, RationalNumber<T> &operand) {
   is >> operand.molecular >> operand.denominator;
   return is;
 }
+
+// the BigInteger class aims at implementing an interger type which won't occur
+// overflow it needs a base unsigned integer type, which should reload the
+// following operators:
+// +, -, *, /, %, +=, -=, /=, *=, %=, -(the unary operator), ==, !=, >, >=, <,
+// <=, <<, >>(stream operator and bit operator) the default basic type is
+// unsigned int
+template <typename T = unsigned int> class BigInteger {
+private:
+  using BasicType = T;
+  std::size_t cell_width = sizeof(BasicType) * 8;
+  bool is_negative;
+  utils::Array<BasicType> sequence;
+
+  void remove_msb_zero() {
+    for (std::size_t index = sequence.size() - 1; sequence[index] == 0;
+         index--) {
+      sequence.pop_back();
+    }
+  }
+
+  BigInteger unsigned_add(const BigInteger &operand1,
+                          const BigInteger &operand2) const {
+    BigInteger res;
+    BasicType carry = 0;
+    for (std::size_t index = 0;
+         index < std::max(operand1.sequence.size(), operand2.sequence.size());
+         index++) {
+      res.sequence.push_back(
+          (operand1.sequence[index] + operand2.sequence[index] + carry) %
+          (1 << cell_width));
+      carry = (operand1.sequence[index] + operand2.sequence[index] + carry) /
+              (1 << cell_width);
+    }
+    res.sequence.push_back(carry);
+    res.remove_msb_zero();
+    return res;
+  }
+
+  // the unsigned sub method assume that the operand2's abs is less than
+  // operand1's abs
+  BigInteger unsigned_sub(const BigInteger &operand1,
+                          const BigInteger &operand2) const {
+    BigInteger res;
+    BasicType carry = 0;
+
+    for (std::size_t index = 0;
+         index < std::min(operand1.sequence.size(), operand2.sequence.size());
+         index++) {
+      if ((operand1.sequence[index] + carry) < operand2.sequence[index]) {
+      }
+    }
+  }
+
+public:
+  // constructors
+  BigInteger() : is_negative(false), sequence() {}
+  BigInteger(const BasicType &num) { sequence.push_back(num); }
+
+  // reload operators
+  bool operator==(const BigInteger &operand) const {
+    remove_msb_zero();
+    operand.remove_msb_zero();
+
+    if (sequence.size() == 0 && operand.sequence.size() == 0) {
+      return true;
+    }
+
+    if ((is_negative != operand.is_negative)) {
+      return false;
+    }
+
+    if (sequence.size() != operand.sequence.size()) {
+      return false;
+    }
+
+    for (std::size_t index = 0; index < sequence.size(); index++) {
+      if (sequence[index] != operand.sequence.size()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool operator!=(const BigInteger &operand) const {
+    remove_msb_zero();
+    operand.remove_msb_zero();
+
+    if (sequence.size() == 0 && operand.sequence.size() == 0) {
+      return false;
+    }
+
+    if ((is_negative != operand.is_negative)) {
+      return true;
+    }
+
+    if (sequence.size() != operand.sequence.size()) {
+      return true;
+    }
+
+    for (std::size_t index = 0; index < sequence.size(); index++) {
+      if (sequence[index] != operand.sequence.size()) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  bool operator<(const BigInteger &operand) const {
+    remove_msb_zero();
+    operand.remove_msb_zero();
+
+    if (sequence.size() == 0 && operand.sequence.size() == 0) {
+      return false;
+    }
+
+    if (is_negative != operand.is_negative) {
+      if (is_negative) {
+        return true;
+      } else {
+        return false;
+      }
+    } else {
+      if (is_negative) {
+        if (sequence.size() > operand.sequence.size()) {
+          return true;
+        }
+        if (sequence.size() < operand.sequence.size()) {
+          return false;
+        }
+
+        for (std::size_t index = sequence.size() - 1; index >= 0; index--) {
+          if (sequence[index] > operand.sequence[index]) {
+            return true;
+          }
+          if (sequence[index] < operand.sequence[index]) {
+            return false;
+          }
+        }
+        return false;
+      } else {
+        if (sequence.size() > operand.sequence.size()) {
+          return false;
+        }
+        if (sequence.size() < operand.sequence.size()) {
+          return true;
+        }
+
+        for (std::size_t index = sequence.size() - 1; index >= 0; index--) {
+          if (sequence[index] > operand.sequence[index]) {
+            return false;
+          }
+          if (sequence[index] < operand.sequence[index]) {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+  }
+
+  bool operator<=(const BigInteger &operand) const {
+    remove_msb_zero();
+    operand.remove_msb_zero();
+
+    if (sequence.size() == 0 && operand.sequence.size() == 0) {
+      return true;
+    }
+
+    if (is_negative != operand.is_negative) {
+      if (is_negative) {
+        return true;
+      } else {
+        return false;
+      }
+    } else {
+      if (is_negative) {
+        if (sequence.size() > operand.sequence.size()) {
+          return true;
+        }
+        if (sequence.size() < operand.sequence.size()) {
+          return false;
+        }
+
+        for (std::size_t index = sequence.size() - 1; index >= 0; index--) {
+          if (sequence[index] > operand.sequence[index]) {
+            return true;
+          }
+          if (sequence[index] < operand.sequence[index]) {
+            return false;
+          }
+        }
+        return true;
+      } else {
+        if (sequence.size() > operand.sequence.size()) {
+          return false;
+        }
+        if (sequence.size() < operand.sequence.size()) {
+          return true;
+        }
+
+        for (std::size_t index = sequence.size() - 1; index >= 0; index--) {
+          if (sequence[index] > operand.sequence[index]) {
+            return false;
+          }
+          if (sequence[index] < operand.sequence[index]) {
+            return true;
+          }
+        }
+        return true;
+      }
+    }
+  }
+
+  bool operator>(const BigInteger &operand) const {
+    remove_msb_zero();
+    operand.remove_msb_zero();
+
+    if (sequence.size() == 0 && operand.sequence.size() == 0) {
+      return false;
+    }
+
+    if (is_negative != operand.is_negative) {
+      if (is_negative) {
+        return false;
+      } else {
+        return true;
+      }
+    } else {
+      if (is_negative) {
+        if (sequence.size() > operand.sequence.size()) {
+          return false;
+        }
+        if (sequence.size() < operand.sequence.size()) {
+          return true;
+        }
+
+        for (std::size_t index = sequence.size() - 1; index >= 0; index--) {
+          if (sequence[index] > operand.sequence[index]) {
+            return false;
+          }
+          if (sequence[index] < operand.sequence[index]) {
+            return true;
+          }
+        }
+        return false;
+      } else {
+        if (sequence.size() > operand.sequence.size()) {
+          return true;
+        }
+        if (sequence.size() < operand.sequence.size()) {
+          return false;
+        }
+
+        for (std::size_t index = sequence.size() - 1; index >= 0; index--) {
+          if (sequence[index] > operand.sequence[index]) {
+            return true;
+          }
+          if (sequence[index] < operand.sequence[index]) {
+            return false;
+          }
+        }
+        return false;
+      }
+    }
+  }
+
+  bool operator>=(const BigInteger &operand) const {
+    remove_msb_zero();
+    operand.remove_msb_zero();
+
+    if (sequence.size() == 0 && operand.sequence.size() == 0) {
+      return true;
+    }
+
+    if (is_negative != operand.is_negative) {
+      if (is_negative) {
+        return false;
+      } else {
+        return true;
+      }
+    } else {
+      if (is_negative) {
+        if (sequence.size() > operand.sequence.size()) {
+          return false;
+        }
+        if (sequence.size() < operand.sequence.size()) {
+          return true;
+        }
+
+        for (std::size_t index = sequence.size() - 1; index >= 0; index--) {
+          if (sequence[index] > operand.sequence[index]) {
+            return false;
+          }
+          if (sequence[index] < operand.sequence[index]) {
+            return true;
+          }
+        }
+        return true;
+      } else {
+        if (sequence.size() > operand.sequence.size()) {
+          return true;
+        }
+        if (sequence.size() < operand.sequence.size()) {
+          return false;
+        }
+
+        for (std::size_t index = sequence.size() - 1; index >= 0; index--) {
+          if (sequence[index] > operand.sequence[index]) {
+            return true;
+          }
+          if (sequence[index] < operand.sequence[index]) {
+            return false;
+          }
+        }
+        return true;
+      }
+    }
+  }
+};
+
+// the HighPrecisionNumber aims at implementing high precision compute
+// which needs a basic type, which should reload the following operators:
+// +, -, *, /, %, +=, -=, /=, *=, %=, -(the unary operator), ==, !=, >, >=, <,
+// <=, <<, >>(stream operator) the default basic type is int
+template <typename T = int> class HighPrecisionNumber {
+private:
+  using BasicType = T;
+  using OperationType = BasicType (*)(const BasicType &operand1,
+                                      const BasicType &operand2);
+  utils::Array<std::pair<OperationType, BasicType>> compute_sequence;
+};
+
 } // namespace basic_algebra
 
 #endif

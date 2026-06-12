@@ -501,6 +501,13 @@ public:
   std::size_t rank() const;
   Matrix adjugate() const;
   Matrix inverse() const;
+  Vector<ValueType> solve(const Vector<ValueType> &b) const;
+  Vector<ValueType> least_squares(const Vector<ValueType> &b) const;
+  std::pair<long double, Vector<long double>>
+  dominant_eigenpair(std::size_t max_iterations = 1000,
+                     long double tolerance = 1e-12L) const;
+  Matrix block_multiply(const Matrix &operand,
+                        std::size_t block_size = 32) const;
   void save_to_file(const std::string &path) const;
   static Matrix load_from_file(const std::string &path);
   long double frobenius_norm() const;
@@ -871,6 +878,156 @@ template <typename T> auto Matrix<T>::inverse() const -> Matrix {
     }
   }
   return right;
+}
+
+template <typename T>
+auto Matrix<T>::solve(const Vector<ValueType> &b) const -> Vector<ValueType> {
+  if (row() != col()) {
+    throw(std::invalid_argument(
+        "error: linear system solving requires a square coefficient matrix"));
+  }
+  if (b.size() != row()) {
+    throw(std::invalid_argument(
+        "error: linear system right-hand side size mismatch"));
+  }
+
+  std::size_t n = row();
+  Matrix left(*this);
+  Vector<ValueType> right(b);
+
+  for (std::size_t i = 0; i < n; i++) {
+    std::size_t pivot = i;
+    for (std::size_t r = i + 1; r < n; r++) {
+      if (detail::abs_value(left[r][i]) > detail::abs_value(left[pivot][i])) {
+        pivot = r;
+      }
+    }
+    if (left[pivot][i] == ValueType(0)) {
+      throw(std::runtime_error(
+          "error: singular matrix cannot solve a unique linear system"));
+    }
+    if (pivot != i) {
+      std::swap(left[pivot], left[i]);
+      std::swap(right[pivot], right[i]);
+    }
+    for (std::size_t r = i + 1; r < n; r++) {
+      ValueType factor = left[r][i] / left[i][i];
+      left[r][i] = ValueType(0);
+      for (std::size_t c = i + 1; c < n; c++) {
+        left[r][c] -= factor * left[i][c];
+      }
+      right[r] -= factor * right[i];
+    }
+  }
+
+  Vector<ValueType> x(n, 0);
+  for (std::size_t offset = 0; offset < n; offset++) {
+    std::size_t i = n - 1 - offset;
+    ValueType sum = right[i];
+    for (std::size_t c = i + 1; c < n; c++) {
+      sum -= left[i][c] * x[c];
+    }
+    x[i] = sum / left[i][i];
+  }
+  return x;
+}
+
+template <typename T>
+auto Matrix<T>::least_squares(const Vector<ValueType> &b) const
+    -> Vector<ValueType> {
+  if (b.size() != row()) {
+    throw(std::invalid_argument(
+        "error: least squares right-hand side size mismatch"));
+  }
+  Matrix normal_matrix = get_transpose() * (*this);
+  Vector<ValueType> normal_rhs = get_transpose() * b;
+  return normal_matrix.solve(normal_rhs);
+}
+
+template <typename T>
+auto Matrix<T>::dominant_eigenpair(std::size_t max_iterations,
+                                   long double tolerance) const
+    -> std::pair<long double, Vector<long double>> {
+  if (row() != col()) {
+    throw(std::invalid_argument("error: eigenvalue solving requires a square "
+                                "matrix"));
+  }
+  if (row() == 0) {
+    throw(std::invalid_argument("error: eigenvalue solving requires a non-empty "
+                                "matrix"));
+  }
+
+  Vector<long double> x(col(), 1.0L);
+  long double eigenvalue = 0;
+  for (std::size_t iter = 0; iter < max_iterations; iter++) {
+    Vector<long double> y(row(), 0.0L);
+    for (std::size_t r = 0; r < row(); r++) {
+      for (std::size_t c = 0; c < col(); c++) {
+        y[r] += static_cast<long double>((*this)[r][c]) * x[c];
+      }
+    }
+
+    long double y_norm = y.norm(2);
+    if (y_norm == 0) {
+      throw(std::runtime_error(
+          "error: power iteration met a zero vector and cannot continue"));
+    }
+    for (std::size_t i = 0; i < y.size(); i++) {
+      y[i] /= y_norm;
+    }
+
+    Vector<long double> ay(row(), 0.0L);
+    for (std::size_t r = 0; r < row(); r++) {
+      for (std::size_t c = 0; c < col(); c++) {
+        ay[r] += static_cast<long double>((*this)[r][c]) * y[c];
+      }
+    }
+    long double numerator = y * ay;
+    long double denominator = y * y;
+    long double current_eigenvalue = numerator / denominator;
+
+    long double diff = 0;
+    for (std::size_t i = 0; i < x.size(); i++) {
+      diff = std::max(diff, std::abs(y[i] - x[i]));
+    }
+    x = y;
+    eigenvalue = current_eigenvalue;
+    if (diff < tolerance) {
+      break;
+    }
+  }
+  return {eigenvalue, x};
+}
+
+template <typename T>
+auto Matrix<T>::block_multiply(const Matrix &operand,
+                               std::size_t block_size) const -> Matrix {
+  if (col() != operand.row()) {
+    throw(std::runtime_error(
+        "error: block matrix multiplication size mismatch"));
+  }
+  if (block_size == 0) {
+    throw(std::invalid_argument("error: block size must be positive"));
+  }
+
+  Matrix res(row(), operand.col(), 0);
+  for (std::size_t ii = 0; ii < row(); ii += block_size) {
+    std::size_t i_end = std::min(ii + block_size, row());
+    for (std::size_t kk = 0; kk < col(); kk += block_size) {
+      std::size_t k_end = std::min(kk + block_size, col());
+      for (std::size_t jj = 0; jj < operand.col(); jj += block_size) {
+        std::size_t j_end = std::min(jj + block_size, operand.col());
+        for (std::size_t i = ii; i < i_end; i++) {
+          for (std::size_t k = kk; k < k_end; k++) {
+            for (std::size_t j = jj; j < j_end; j++) {
+              res[i][j] += (*this)[i][k] * operand[k][j];
+            }
+          }
+        }
+      }
+    }
+  }
+  return res;
 }
 
 template <typename T> void Matrix<T>::save_to_file(const std::string &path) const {

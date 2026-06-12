@@ -14,5 +14,5 @@ target_include_directories(Utils INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(BasicAlgebra INTERFACE Utils)
 target_link_libraries(LinearAlgebra INTERFACE BasicAlgebra)
 
-add_executable(test test.cpp)
+add_executable(test src/final_demo.cpp)
 target_link_libraries(test BasicAlgebra LinearAlgebra)

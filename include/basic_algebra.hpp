@@ -620,12 +620,18 @@ public:
       throw(std::runtime_error("error: HighPrecisionNumber divisor cannot be 0"));
     }
     HighPrecisionNumber result;
-    const std::size_t extra_precision = 30;
+    const std::size_t extra_precision = default_division_precision();
     result.scaled_value =
         (scaled_value * pow10(operand.scale + extra_precision)) /
         (operand.scaled_value * pow10(scale));
     result.scale = extra_precision;
     return result;
+  }
+  static std::size_t default_division_precision() {
+    return default_division_precision_ref();
+  }
+  static void set_default_division_precision(std::size_t precision) {
+    default_division_precision_ref() = precision;
   }
   HighPrecisionNumber &operator+=(const HighPrecisionNumber &operand) {
     *this = *this + operand;
@@ -672,6 +678,12 @@ public:
   template <typename U>
   friend std::istream &operator>>(std::istream &is,
                                   HighPrecisionNumber<U> &operand);
+
+private:
+  static std::size_t &default_division_precision_ref() {
+    static std::size_t precision = 30;
+    return precision;
+  }
 };
 
 template <typename T>

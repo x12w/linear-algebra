@@ -11,8 +11,10 @@
 #include <memory>
 #include <ostream>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 #include <utility>
+#include <vector>
 #ifndef LINEAR_HPP
 #define LINEAR_HPP
 
@@ -30,6 +32,55 @@ template <typename T> long double abs_value(const T &value) {
 
 template <typename T> long double abs_value(const std::complex<T> &value) {
   return std::abs(value);
+}
+
+template <typename T, typename Enable = void> struct NumericTraits {
+  static long double zero_tolerance() { return 0.0L; }
+  static bool is_zero(const T &value) { return value == T(0); }
+};
+
+template <typename T>
+struct NumericTraits<T, std::enable_if_t<std::is_floating_point_v<T>>> {
+  static long double zero_tolerance() {
+    return static_cast<long double>(std::numeric_limits<T>::epsilon()) * 1024;
+  }
+  static bool is_zero(const T &value) {
+    return abs_value(value) <= zero_tolerance();
+  }
+};
+
+template <typename T>
+struct NumericTraits<T, std::enable_if_t<std::is_integral_v<T>>> {
+  static long double zero_tolerance() { return 0.0L; }
+  static bool is_zero(const T &value) { return value == T(0); }
+};
+
+template <typename T>
+struct NumericTraits<std::complex<T>> {
+  static long double zero_tolerance() {
+    return NumericTraits<T>::zero_tolerance();
+  }
+  static bool is_zero(const std::complex<T> &value) {
+    return abs_value(value) <= zero_tolerance();
+  }
+};
+
+template <typename T> bool is_zero(const T &value) {
+  return NumericTraits<T>::is_zero(value);
+}
+
+inline std::size_t normalized_thread_count(std::size_t requested,
+                                           std::size_t work_items) {
+  if (work_items == 0) {
+    return 1;
+  }
+  if (requested == 0) {
+    requested = std::thread::hardware_concurrency();
+  }
+  if (requested == 0) {
+    requested = 2;
+  }
+  return std::max<std::size_t>(1, std::min(requested, work_items));
 }
 } // namespace detail
 
@@ -503,14 +554,24 @@ public:
   Matrix inverse() const;
   Vector<ValueType> solve(const Vector<ValueType> &b) const;
   Vector<ValueType> least_squares(const Vector<ValueType> &b) const;
+  std::pair<Matrix<long double>, Matrix<long double>>
+  qr_decomposition(long double tolerance = 1e-12L) const;
+  Vector<long double> least_squares_qr(const Vector<ValueType> &b,
+                                       long double tolerance = 1e-12L) const;
   std::pair<long double, Vector<long double>>
   dominant_eigenpair(std::size_t max_iterations = 1000,
                      long double tolerance = 1e-12L) const;
+  Vector<long double> eigenvalues_qr(std::size_t max_iterations = 1000,
+                                     long double tolerance = 1e-10L) const;
   Matrix block_multiply(const Matrix &operand,
                         std::size_t block_size = 32) const;
+  Matrix parallel_block_multiply(const Matrix &operand,
+                                 std::size_t block_size = 32,
+                                 std::size_t thread_count = 0) const;
   void save_to_file(const std::string &path) const;
   static Matrix load_from_file(const std::string &path);
   long double frobenius_norm() const;
+  long double parallel_frobenius_norm(std::size_t thread_count = 0) const;
   long double row_sum_norm() const;
   long double col_sum_norm() const;
   long double spectral_norm(std::size_t max_iterations = 1000,
@@ -701,7 +762,7 @@ template <typename T> auto Matrix<T>::determinant() const -> ValueType {
         pivot = r;
       }
     }
-    if (temp[pivot][i] == ValueType(0)) {
+    if (detail::is_zero(temp[pivot][i])) {
       return ValueType(0);
     }
     if (pivot != i) {
@@ -732,7 +793,7 @@ template <typename T> auto Matrix<T>::row_echelon_form() const -> Matrix {
         pivot = r;
       }
     }
-    if (res[pivot][pivot_col] == ValueType(0)) {
+    if (detail::is_zero(res[pivot][pivot_col])) {
       continue;
     }
     if (pivot != pivot_row) {
@@ -762,7 +823,7 @@ auto Matrix<T>::reduced_row_echelon_form() const -> Matrix {
         pivot = r;
       }
     }
-    if (res[pivot][pivot_col] == ValueType(0)) {
+    if (detail::is_zero(res[pivot][pivot_col])) {
       continue;
     }
     if (pivot != pivot_row) {
@@ -792,7 +853,7 @@ template <typename T> std::size_t Matrix<T>::rank() const {
   for (std::size_t r = 0; r < ref.row(); r++) {
     bool non_zero = false;
     for (std::size_t c = 0; c < ref.col(); c++) {
-      if (ref[r][c] != ValueType(0)) {
+      if (!detail::is_zero(ref[r][c])) {
         non_zero = true;
         break;
       }
@@ -854,7 +915,7 @@ template <typename T> auto Matrix<T>::inverse() const -> Matrix {
         pivot = r;
       }
     }
-    if (left[pivot][i] == ValueType(0)) {
+    if (detail::is_zero(left[pivot][i])) {
       throw(std::runtime_error("error: singular matrix has no inverse"));
     }
     if (pivot != i) {
@@ -902,7 +963,7 @@ auto Matrix<T>::solve(const Vector<ValueType> &b) const -> Vector<ValueType> {
         pivot = r;
       }
     }
-    if (left[pivot][i] == ValueType(0)) {
+    if (detail::is_zero(left[pivot][i])) {
       throw(std::runtime_error(
           "error: singular matrix cannot solve a unique linear system"));
     }
@@ -939,9 +1000,99 @@ auto Matrix<T>::least_squares(const Vector<ValueType> &b) const
     throw(std::invalid_argument(
         "error: least squares right-hand side size mismatch"));
   }
+  if constexpr (std::is_floating_point_v<ValueType>) {
+    Vector<long double> stable_result = least_squares_qr(b);
+    Vector<ValueType> result(stable_result.size(), 0);
+    for (std::size_t i = 0; i < stable_result.size(); i++) {
+      result[i] = static_cast<ValueType>(stable_result[i]);
+    }
+    return result;
+  }
   Matrix normal_matrix = get_transpose() * (*this);
   Vector<ValueType> normal_rhs = get_transpose() * b;
   return normal_matrix.solve(normal_rhs);
+}
+
+template <typename T>
+auto Matrix<T>::qr_decomposition(long double tolerance) const
+    -> std::pair<Matrix<long double>, Matrix<long double>> {
+  if (row() < col()) {
+    throw(std::invalid_argument(
+        "error: reduced QR decomposition requires row >= col"));
+  }
+  Matrix<long double> q(row(), col(), 0.0L);
+  Matrix<long double> r(col(), col(), 0.0L);
+
+  for (std::size_t k = 0; k < col(); k++) {
+    Vector<long double> v(row(), 0.0L);
+    for (std::size_t i = 0; i < row(); i++) {
+      v[i] = static_cast<long double>((*this)[i][k]);
+    }
+
+    for (std::size_t j = 0; j < k; j++) {
+      long double projection = 0;
+      for (std::size_t i = 0; i < row(); i++) {
+        projection += q[i][j] * v[i];
+      }
+      r[j][k] = projection;
+      for (std::size_t i = 0; i < row(); i++) {
+        v[i] -= projection * q[i][j];
+      }
+    }
+
+    long double norm = v.norm(2);
+    if (norm <= tolerance) {
+      throw(std::runtime_error(
+          "error: QR decomposition met a linearly dependent column"));
+    }
+    r[k][k] = norm;
+    for (std::size_t i = 0; i < row(); i++) {
+      q[i][k] = v[i] / norm;
+    }
+  }
+
+  return {q, r};
+}
+
+template <typename T>
+auto Matrix<T>::least_squares_qr(const Vector<ValueType> &b,
+                                 long double tolerance) const
+    -> Vector<long double> {
+  if (b.size() != row()) {
+    throw(std::invalid_argument(
+        "error: QR least squares right-hand side size mismatch"));
+  }
+  if (row() < col()) {
+    throw(std::invalid_argument(
+        "error: QR least squares currently requires row >= col"));
+  }
+
+  auto qr = qr_decomposition(tolerance);
+  Matrix<long double> &q = qr.first;
+  Matrix<long double> &r = qr.second;
+  Vector<long double> y(col(), 0.0L);
+
+  for (std::size_t c = 0; c < col(); c++) {
+    for (std::size_t i = 0; i < row(); i++) {
+      y[c] += q[i][c] * static_cast<long double>(b[i]);
+    }
+  }
+
+  Vector<long double> x(col(), 0.0L);
+  for (std::size_t offset = 0; offset < col(); offset++) {
+    std::size_t i = col() - 1 - offset;
+    long double sum = y[i];
+    for (std::size_t c = i + 1; c < col(); c++) {
+      sum -= r[i][c] * x[c];
+    }
+    if (std::abs(r[i][i]) <= tolerance) {
+      throw(std::runtime_error(
+          "error: rank deficient matrix cannot be solved by QR least squares"));
+    }
+    x[i] = sum / r[i][i];
+  }
+
+  return x;
 }
 
 template <typename T>
@@ -968,7 +1119,7 @@ auto Matrix<T>::dominant_eigenpair(std::size_t max_iterations,
     }
 
     long double y_norm = y.norm(2);
-    if (y_norm == 0) {
+    if (detail::is_zero(y_norm)) {
       throw(std::runtime_error(
           "error: power iteration met a zero vector and cannot continue"));
     }
@@ -997,6 +1148,45 @@ auto Matrix<T>::dominant_eigenpair(std::size_t max_iterations,
     }
   }
   return {eigenvalue, x};
+}
+
+template <typename T>
+auto Matrix<T>::eigenvalues_qr(std::size_t max_iterations,
+                               long double tolerance) const
+    -> Vector<long double> {
+  if (row() != col()) {
+    throw(std::invalid_argument(
+        "error: QR eigenvalue solving requires a square matrix"));
+  }
+  Matrix<long double> current(row(), col(), 0.0L);
+  for (std::size_t r = 0; r < row(); r++) {
+    for (std::size_t c = 0; c < col(); c++) {
+      current[r][c] = static_cast<long double>((*this)[r][c]);
+    }
+  }
+
+  for (std::size_t iter = 0; iter < max_iterations; iter++) {
+    auto qr = current.qr_decomposition(tolerance);
+    current = qr.second * qr.first;
+
+    long double off_diagonal_norm = 0;
+    for (std::size_t r = 0; r < current.row(); r++) {
+      for (std::size_t c = 0; c < current.col(); c++) {
+        if (r != c) {
+          off_diagonal_norm += current[r][c] * current[r][c];
+        }
+      }
+    }
+    if (std::sqrt(off_diagonal_norm) <= tolerance) {
+      break;
+    }
+  }
+
+  Vector<long double> values(row(), 0.0L);
+  for (std::size_t i = 0; i < row(); i++) {
+    values[i] = current[i][i];
+  }
+  return values;
 }
 
 template <typename T>
@@ -1030,6 +1220,64 @@ auto Matrix<T>::block_multiply(const Matrix &operand,
   return res;
 }
 
+template <typename T>
+auto Matrix<T>::parallel_block_multiply(const Matrix &operand,
+                                        std::size_t block_size,
+                                        std::size_t thread_count) const
+    -> Matrix {
+  if (col() != operand.row()) {
+    throw(std::runtime_error(
+        "error: parallel block matrix multiplication size mismatch"));
+  }
+  if (block_size == 0) {
+    throw(std::invalid_argument("error: block size must be positive"));
+  }
+  if (row() == 0 || operand.col() == 0 || col() == 0) {
+    return Matrix(row(), operand.col(), 0);
+  }
+
+  thread_count = detail::normalized_thread_count(thread_count, row());
+  if (thread_count == 1 || row() < block_size * 2) {
+    return block_multiply(operand, block_size);
+  }
+
+  Matrix res(row(), operand.col(), 0);
+  std::vector<std::thread> workers;
+  workers.reserve(thread_count);
+  std::size_t rows_per_thread = (row() + thread_count - 1) / thread_count;
+
+  for (std::size_t worker = 0; worker < thread_count; worker++) {
+    std::size_t row_begin = worker * rows_per_thread;
+    std::size_t row_end = std::min(row_begin + rows_per_thread, row());
+    if (row_begin >= row_end) {
+      break;
+    }
+    workers.emplace_back([&, row_begin, row_end]() {
+      for (std::size_t ii = row_begin; ii < row_end; ii += block_size) {
+        std::size_t i_end = std::min(ii + block_size, row_end);
+        for (std::size_t kk = 0; kk < col(); kk += block_size) {
+          std::size_t k_end = std::min(kk + block_size, col());
+          for (std::size_t jj = 0; jj < operand.col(); jj += block_size) {
+            std::size_t j_end = std::min(jj + block_size, operand.col());
+            for (std::size_t i = ii; i < i_end; i++) {
+              for (std::size_t k = kk; k < k_end; k++) {
+                for (std::size_t j = jj; j < j_end; j++) {
+                  res[i][j] += (*this)[i][k] * operand[k][j];
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  for (auto &worker : workers) {
+    worker.join();
+  }
+  return res;
+}
+
 template <typename T> void Matrix<T>::save_to_file(const std::string &path) const {
   std::ofstream out(path);
   if (!out) {
@@ -1059,6 +1307,50 @@ template <typename T> long double Matrix<T>::frobenius_norm() const {
       long double value = detail::abs_value((*this)[r][c]);
       sum += value * value;
     }
+  }
+  return std::sqrt(sum);
+}
+
+template <typename T>
+long double Matrix<T>::parallel_frobenius_norm(std::size_t thread_count) const {
+  if (row() == 0 || col() == 0) {
+    return 0;
+  }
+  thread_count = detail::normalized_thread_count(thread_count, row());
+  if (thread_count == 1 || row() < 64) {
+    return frobenius_norm();
+  }
+
+  std::vector<long double> partial_sums(thread_count, 0);
+  std::vector<std::thread> workers;
+  workers.reserve(thread_count);
+  std::size_t rows_per_thread = (row() + thread_count - 1) / thread_count;
+
+  for (std::size_t worker = 0; worker < thread_count; worker++) {
+    std::size_t row_begin = worker * rows_per_thread;
+    std::size_t row_end = std::min(row_begin + rows_per_thread, row());
+    if (row_begin >= row_end) {
+      break;
+    }
+    workers.emplace_back([&, worker, row_begin, row_end]() {
+      long double local_sum = 0;
+      for (std::size_t r = row_begin; r < row_end; r++) {
+        for (std::size_t c = 0; c < col(); c++) {
+          long double value = detail::abs_value((*this)[r][c]);
+          local_sum += value * value;
+        }
+      }
+      partial_sums[worker] = local_sum;
+    });
+  }
+
+  for (auto &worker : workers) {
+    worker.join();
+  }
+
+  long double sum = 0;
+  for (long double partial_sum : partial_sums) {
+    sum += partial_sum;
   }
   return std::sqrt(sum);
 }

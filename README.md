@@ -116,6 +116,8 @@ std::cout << a + b << std::endl;
 - 整数构造：`HighPrecisionNumber<>(long long)`
 - 字符串构造：`HighPrecisionNumber<>("1.2345")`
 - 非 `explicit` 浮点构造：`HighPrecisionNumber<>(float)`、`HighPrecisionNumber<>(double)`
+- `set_default_division_precision(precision)`：设置除法结果默认保留的小数位数
+- `default_division_precision()`：读取当前默认除法精度
 - 运算：`+`、`-`、`*`、`/`
 - 复合赋值：`+=`、`-=`、`*=`、`/=`
 - 比较：`==`、`!=`、`<`、`<=`、`>`、`>=`
@@ -126,6 +128,7 @@ std::cout << a + b << std::endl;
 ```cpp
 HighPrecisionNumber<> x = 1.25;
 HighPrecisionNumber<> y("2.5");
+HighPrecisionNumber<>::set_default_division_precision(50);
 std::cout << x + y << std::endl;
 ```
 
@@ -234,9 +237,14 @@ std::cout << v.infinity_norm() << std::endl;
 任务三接口：
 
 - `solve(b)`：方阵线性方程组 `Ax=b` 求解，使用带主元选择的高斯消元。
-- `least_squares(b)`：非方阵最小二乘解，使用正规方程 `A^T A x = A^T b`。
+- `least_squares(b)`：非方阵最小二乘解，浮点类型默认使用 QR 分解，非浮点精确类型使用正规方程。
+- `qr_decomposition(tolerance)`：改进 Gram-Schmidt QR 分解，返回 `Q` 和 `R`。
+- `least_squares_qr(b, tolerance)`：使用 QR 分解求更稳定的最小二乘解。
 - `dominant_eigenpair(max_iterations, tolerance)`：幂迭代求主特征值和对应特征向量。
+- `eigenvalues_qr(max_iterations, tolerance)`：QR 迭代求实方阵全部特征值近似。
 - `block_multiply(matrix, block_size)`：分块矩阵乘法，用于和普通三重循环矩阵乘法对比。
+- `parallel_block_multiply(matrix, block_size, thread_count)`：多线程分块矩阵乘法。
+- `parallel_frobenius_norm(thread_count)`：多线程 Frobenius 范数。
 
 文件接口：
 
@@ -335,6 +343,14 @@ Ax = b
 
 当前使用带主元选择的高斯消元，将矩阵化为上三角形式后回代求解。若矩阵奇异，则不存在唯一解并抛出异常。
 
+数值稳定性：
+
+```text
+浮点数主元判断使用 epsilon 容差，而不是直接比较 value == 0
+```
+
+库内部通过类型相关的 `NumericTraits<T>` 统一近零判断。`float`、`double`、`long double` 和 `std::complex<T>` 使用基于机器精度的容差；整数、有理数和高精度数默认使用精确零判断。
+
 最小二乘：
 
 ```text
@@ -342,7 +358,7 @@ min ||Ax - b||_2
 A^T A x = A^T b
 ```
 
-当方程组为过定约束时，`least_squares()` 使用正规方程求使残差平方和最小的解，可用于线性回归和多项式拟合。
+当方程组为过定约束时，`least_squares()` 求使残差平方和最小的解，可用于线性回归和多项式拟合。浮点矩阵默认走 QR 分解，避免正规方程中 `A^T A` 放大条件数；有理数等精确类型仍可使用正规方程路径。
 
 主特征值与特征向量：
 
@@ -352,6 +368,15 @@ Ax = lambda x
 
 `dominant_eigenpair()` 使用幂迭代法求绝对值最大的特征值及其单位化特征向量。该能力可支撑 PCA 中协方差矩阵主方向的计算。
 
+全部特征值：
+
+```text
+A_k = Q_k R_k
+A_{k+1} = R_k Q_k
+```
+
+`eigenvalues_qr()` 使用未带位移的 QR 迭代，适合课程演示和实对称矩阵场景。对于存在复特征值或收敛较慢的矩阵，结果仍是近似值。
+
 分块矩阵乘法：
 
 ```text
@@ -359,6 +384,15 @@ C_ij += A_ik * B_kj
 ```
 
 `block_multiply()` 按块遍历矩阵，减少大矩阵乘法中的缓存失效，可与普通 `operator*` 的三重循环结果做一致性和性能对比。
+
+多线程优化：
+
+```text
+parallel_block_multiply() 按结果矩阵行块拆分任务
+parallel_frobenius_norm() 按行拆分平方和
+```
+
+多线程接口默认使用 `std::thread::hardware_concurrency()`，也支持手动指定线程数。小矩阵会自动回退到单线程实现，避免线程创建成本超过计算收益。
 
 ## 异常处理
 
@@ -370,6 +404,7 @@ C_ij += A_ik * B_kj
 - 奇异方阵求唯一线性方程组解。
 - 最小二乘右端向量维度不匹配。
 - 非方阵求特征值。
+- 分块矩阵乘法中块大小为 0。
 - 除数为 0。
 - p-范数中 `p < 1`。
 - 文件读取或写入失败。
@@ -377,7 +412,7 @@ C_ij += A_ik * B_kj
 ## 当前限制
 
 - 谱范数为迭代近似结果，不是符号精确计算。
-- 主特征值使用幂迭代，只返回主特征值和对应特征向量，不返回全部特征值。
-- 最小二乘当前使用正规方程，适合课程演示；病态矩阵上 QR 分解会更稳定。
-- `HighPrecisionNumber<>` 使用定点小数模型，除法默认保留 30 位小数。
-- 分块矩阵乘法提供优化接口和对比入口，但未做多线程或 Strassen 算法。
+- 主特征值使用幂迭代；全部特征值使用未带位移的 QR 迭代，复杂矩阵可能收敛较慢。
+- QR 最小二乘当前要求 `row >= col` 且矩阵列满秩。
+- `HighPrecisionNumber<>` 使用定点小数模型，除法精度可配置，默认保留 30 位小数。
+- 分块矩阵乘法已提供单线程和多线程接口，但未实现 Strassen 算法或 GPU 加速。

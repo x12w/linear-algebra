@@ -67,6 +67,8 @@ int main() {
   observations[3] = 10;
   std::cout << "Least squares line y = c0 + c1*x: coefficients = "
             << least_square_matrix.least_squares(observations) << "\n\n";
+  std::cout << "QR least squares coefficients = "
+            << least_square_matrix.least_squares_qr(observations) << "\n\n";
 
   Matrix<double> eigen_matrix(2, 2);
   eigen_matrix[0][0] = 2;
@@ -76,12 +78,14 @@ int main() {
   auto eigen = eigen_matrix.dominant_eigenpair();
   std::cout << "Dominant eigenvalue: " << eigen.first << '\n';
   std::cout << "Dominant eigenvector: " << eigen.second << "\n\n";
+  std::cout << "QR eigenvalues: " << eigen_matrix.eigenvalues_qr() << "\n\n";
 
-  Matrix<double> left(4, 4);
-  Matrix<double> right(4, 4);
-  for (std::size_t r = 0; r < 4; r++) {
-    for (std::size_t c = 0; c < 4; c++) {
-      left[r][c] = static_cast<double>(r + c + 1);
+  const std::size_t performance_size = 96;
+  Matrix<double> left(performance_size, performance_size);
+  Matrix<double> right(performance_size, performance_size);
+  for (std::size_t r = 0; r < performance_size; r++) {
+    for (std::size_t c = 0; c < performance_size; c++) {
+      left[r][c] = static_cast<double>((r + c) % 11 + 1);
       right[r][c] = static_cast<double>((r == c) ? 2 : 1);
     }
   }
@@ -89,10 +93,19 @@ int main() {
   Matrix<double> normal_product = left * right;
   auto normal_end = std::chrono::high_resolution_clock::now();
   auto block_start = std::chrono::high_resolution_clock::now();
-  Matrix<double> block_product = left.block_multiply(right, 2);
+  Matrix<double> block_product = left.block_multiply(right, 16);
   auto block_end = std::chrono::high_resolution_clock::now();
+  auto parallel_block_start = std::chrono::high_resolution_clock::now();
+  Matrix<double> parallel_block_product =
+      left.parallel_block_multiply(right, 16, 4);
+  auto parallel_block_end = std::chrono::high_resolution_clock::now();
   std::cout << "Block multiplication equals normal multiplication: "
             << (block_product == normal_product ? "true" : "false") << '\n';
+  std::cout << "Parallel block multiplication equals normal multiplication: "
+            << (parallel_block_product == normal_product ? "true" : "false")
+            << '\n';
+  std::cout << "Parallel Frobenius norm(left): "
+            << left.parallel_frobenius_norm(2) << '\n';
   std::cout << "Normal multiply time(ns): "
             << std::chrono::duration_cast<std::chrono::nanoseconds>(
                    normal_end - normal_start)
@@ -101,6 +114,11 @@ int main() {
   std::cout << "Block multiply time(ns): "
             << std::chrono::duration_cast<std::chrono::nanoseconds>(
                    block_end - block_start)
+                   .count()
+            << '\n';
+  std::cout << "Parallel block multiply time(ns): "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   parallel_block_end - parallel_block_start)
                    .count()
             << "\n\n";
 
@@ -113,6 +131,11 @@ int main() {
   HighPrecisionNumber<> hp2("2.5");
   std::cout << "HighPrecision sum: " << hp1 + hp2 << '\n';
   std::cout << "HighPrecision division: " << hp2 / hp1 << '\n';
+  HighPrecisionNumber<>::set_default_division_precision(50);
+  std::cout << "HighPrecision division precision: "
+            << HighPrecisionNumber<>::default_division_precision() << '\n';
+  std::cout << "HighPrecision 1/7: "
+            << HighPrecisionNumber<>(1LL) / HighPrecisionNumber<>(7LL) << '\n';
 
   return 0;
 }

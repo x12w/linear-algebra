@@ -1,12 +1,14 @@
 #include <basic_algebra.hpp>
 #include <chrono>
 #include <filesystem>
+#include <gpu_acceleration.hpp>
 #include <iomanip>
 #include <image_processing.hpp>
 #include <iostream>
 #include <linear_algebra.hpp>
 
 using namespace basic_algebra;
+using namespace gpu_acceleration;
 using namespace image_processing;
 using namespace linear_algebra;
 
@@ -83,7 +85,7 @@ int main() {
   std::cout << "Dominant eigenvector: " << eigen.second << "\n\n";
   std::cout << "QR eigenvalues: " << eigen_matrix.eigenvalues_qr() << "\n\n";
 
-  const std::size_t performance_size = 96;
+  const std::size_t performance_size = 128;
   Matrix<double> left(performance_size, performance_size);
   Matrix<double> right(performance_size, performance_size);
   for (std::size_t r = 0; r < performance_size; r++) {
@@ -98,15 +100,41 @@ int main() {
   auto block_start = std::chrono::high_resolution_clock::now();
   Matrix<double> block_product = left.block_multiply(right, 16);
   auto block_end = std::chrono::high_resolution_clock::now();
+  auto strassen_start = std::chrono::high_resolution_clock::now();
+  Matrix<double> strassen_product = left.strassen_multiply(right, 64);
+  auto strassen_end = std::chrono::high_resolution_clock::now();
   auto parallel_block_start = std::chrono::high_resolution_clock::now();
   Matrix<double> parallel_block_product =
       left.parallel_block_multiply(right, 16, 4);
   auto parallel_block_end = std::chrono::high_resolution_clock::now();
+  bool opencl_matrix_success = false;
+  long long opencl_matrix_time = 0;
+  Matrix<double> opencl_product;
+  try {
+    auto opencl_matrix_start = std::chrono::high_resolution_clock::now();
+    opencl_product = opencl_matrix_multiply(left, right);
+    auto opencl_matrix_end = std::chrono::high_resolution_clock::now();
+    opencl_matrix_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             opencl_matrix_end - opencl_matrix_start)
+                             .count();
+    opencl_matrix_success = true;
+  } catch (const std::exception &ex) {
+    std::cout << "OpenCL matrix multiply skipped: " << ex.what() << '\n';
+  }
   std::cout << "Block multiplication equals normal multiplication: "
             << (block_product == normal_product ? "true" : "false") << '\n';
+  std::cout << "Strassen multiplication equals normal multiplication: "
+            << (strassen_product == normal_product ? "true" : "false")
+            << '\n';
   std::cout << "Parallel block multiplication equals normal multiplication: "
             << (parallel_block_product == normal_product ? "true" : "false")
             << '\n';
+  if (opencl_matrix_success) {
+    std::cout << "OpenCL device: " << opencl_device_name() << '\n';
+    std::cout << "OpenCL matrix multiplication equals normal multiplication: "
+              << (opencl_product == normal_product ? "true" : "false")
+              << '\n';
+  }
   std::cout << "Parallel Frobenius norm(left): "
             << left.parallel_frobenius_norm(2) << '\n';
   std::cout << "Normal multiply time(ns): "
@@ -119,11 +147,20 @@ int main() {
                    block_end - block_start)
                    .count()
             << '\n';
+  std::cout << "Strassen multiply time(ns): "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   strassen_end - strassen_start)
+                   .count()
+            << '\n';
   std::cout << "Parallel block multiply time(ns): "
             << std::chrono::duration_cast<std::chrono::nanoseconds>(
                    parallel_block_end - parallel_block_start)
                    .count()
             << "\n\n";
+  if (opencl_matrix_success) {
+    std::cout << "OpenCL matrix multiply time(ns): " << opencl_matrix_time
+              << "\n\n";
+  }
 
   BigInteger<> big1("123456789012345678901234567890");
   BigInteger<> big2("9876543210");
@@ -152,6 +189,13 @@ int main() {
   }
 
   Image blurred = convolve2d(image, gaussian_kernel_3x3());
+  try {
+    Image opencl_blur = opencl_convolve3x3(image, gaussian_kernel_3x3());
+    std::cout << "OpenCL 3x3 convolution equals CPU convolution: "
+              << (opencl_blur == blurred ? "true" : "false") << '\n';
+  } catch (const std::exception &ex) {
+    std::cout << "OpenCL convolution skipped: " << ex.what() << '\n';
+  }
   Image edge_strength = normalize_to_byte_range(sobel_edges(image));
   Image edge_map = threshold(edge_strength, 80.0);
   ImageFeatures features = analyze_features(edge_strength, 80.0);

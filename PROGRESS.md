@@ -15,6 +15,7 @@
 - `include/basic_algebra.hpp`：基础数值类型。
 - `include/linear_algebra.hpp`：向量、矩阵及线性代数算法。
 - `include/image_processing.hpp`：任务四图像卷积、Sobel 边缘检测和特征统计。
+- `include/gpu_acceleration.hpp`：OpenCL 矩阵乘法和 3x3 卷积加速。
 - `include/utils.hpp`：底层动态数组工具。
 - `src/final_demo.cpp`：最终阶段演示主程序。
 - `demo/main.cpp`：中期汇报演示主程序。
@@ -26,10 +27,11 @@ CMake 已配置 interface library：
 - `BasicAlgebra`
 - `LinearAlgebra`
 - `ImageProcessing`
+- `GPUAcceleration`
 
 并提供 `test` 可执行目标用于演示。
 
-项目已增加 `shell.nix` 和 `.envrc`，可通过 `direnv allow` 或 `nix-shell` 获得 CMake、GCC、pkg-config 和 OpenCV 开发环境。OpenCV 当前作为可选依赖探测，核心图像卷积演示不依赖 OpenCV 即可运行；在 Nix/OpenCV 环境下可读取项目根目录中的 JPG 测试图片并输出 PNG 处理结果。
+项目已增加 `shell.nix` 和 `.envrc`，可通过 `direnv allow` 或 `nix-shell` 获得 CMake、GCC、pkg-config、OpenCV 和 OpenCL 开发环境。OpenCV/OpenCL 当前作为可选依赖探测，核心图像卷积演示不依赖二者即可运行；在 Nix 环境下可读取项目根目录中的 JPG 测试图片、输出 PNG 处理结果并运行 OpenCL 加速路径。
 
 ### 2. 基础代数类型
 
@@ -123,6 +125,7 @@ cond(A) = ||A|| * ||A^{-1}||
 - `dominant_eigenpair(max_iterations, tolerance)`：使用幂迭代法求实方阵主特征值和对应单位特征向量。
 - `eigenvalues_qr(max_iterations, tolerance)`：使用 QR 迭代求实方阵全部特征值近似。
 - `block_multiply(matrix, block_size)`：实现分块矩阵乘法，可与普通矩阵乘法进行结果和性能对比。
+- `strassen_multiply(matrix, threshold)`：实现 Strassen 矩阵乘法，自动补零到 2 的幂，小规模子问题回退到分块乘法。
 - `parallel_block_multiply(matrix, block_size, thread_count)`：实现多线程分块矩阵乘法。
 - `parallel_frobenius_norm(thread_count)`：实现多线程 Frobenius 范数。
 
@@ -132,7 +135,7 @@ cond(A) = ||A|| * ||A^{-1}||
 - 过定约束直线拟合的最小二乘系数。
 - QR 最小二乘系数。
 - 对称矩阵主特征值、特征向量和 QR 全部特征值近似。
-- 普通矩阵乘法和分块矩阵乘法的一致性与耗时对比。
+- 普通矩阵乘法、分块矩阵乘法和 Strassen 矩阵乘法的一致性与耗时对比。
 - 多线程分块矩阵乘法与普通矩阵乘法的一致性与耗时对比。
 
 ### 7. 数值稳定性与性能优化
@@ -147,6 +150,8 @@ cond(A) = ||A|| * ||A^{-1}||
 - 高精度浮点除法精度从固定 30 位改为可配置，默认仍为 30 位。
 - 新增多线程分块矩阵乘法，按结果矩阵行块拆分任务，避免线程写冲突。
 - 新增多线程 Frobenius 范数，按行拆分平方和后合并。
+- 新增 Strassen 矩阵乘法，降低中大型稠密方阵乘法的理论复杂度。
+- 已实现可选 OpenCL GPU 后端，覆盖 `double` 矩阵乘法和 3x3 图像卷积；无 OpenCL 时保留 CPU fallback。
 
 ### 8. 任务四卷积与图像特征分析
 
@@ -164,7 +169,24 @@ cond(A) = ||A|| * ||A^{-1}||
 
 `src/final_demo.cpp` 已增加任务四演示：生成 32x32 合成灰度图，输出原图、高斯模糊图、Sobel 边缘强度图和二值边缘图到 `output/` 目录，并打印边缘均值、方差和边缘密度。若 OpenCV 可用且项目根目录存在 `istockphoto-184276818-612x612.jpg`，还会读取真实图片并输出灰度图、模糊图、Sobel 图和二值边缘 PNG。
 
-### 9. 异常处理
+### 9. OpenCL GPU 加速
+
+已新增 `gpu_acceleration.hpp`：
+
+- `opencl_compiled()`：判断当前构建是否启用 OpenCL。
+- `opencl_device_name()`：输出 OpenCL 设备名称。
+- `opencl_matrix_multiply(lhs, rhs)`：OpenCL `double` 矩阵乘法。
+- `opencl_convolve3x3(image, kernel)`：OpenCL `double` 3x3 卷积。
+
+Nix/OpenCL 环境下已验证：
+
+- OpenCL 设备：NVIDIA GeForce RTX 4060 Laptop GPU。
+- OpenCL 矩阵乘法结果与 CPU 普通乘法一致。
+- OpenCL 3x3 卷积结果与 CPU 卷积一致。
+
+首次 GPU 调用会完成 OpenCL runtime 和 program 初始化；后续调用复用 runtime/program，但仍包含 kernel 创建、buffer 分配和数据传输开销，因此单次小规模计算不一定比 CPU 快。后续若继续优化，应复用 kernel 对象和缓冲区，并做批量矩阵或批量图像处理。
+
+### 10. 异常处理
 
 已在主要非法操作中加入异常处理：
 
@@ -193,10 +215,11 @@ cond(A) = ||A|| * ||A^{-1}||
 5. 非方阵最小二乘。
 6. QR 最小二乘。
 7. 主特征值、特征向量与 QR 全部特征值近似。
-8. 普通矩阵乘法与分块矩阵乘法对比。
+8. 普通矩阵乘法、分块矩阵乘法与 Strassen 矩阵乘法对比。
 9. 多线程分块矩阵乘法与多线程 Frobenius 范数。
 10. 高精度整数和高精度浮点运算。
 11. 任务四卷积、Sobel 边缘检测和图像特征统计。
+12. OpenCL 矩阵乘法和 OpenCL 3x3 卷积。
 
 运行方式：
 
@@ -213,9 +236,10 @@ cmake --build build
 - 已形成清晰的项目结构和说明文档。
 - 已完成任务一的主要矩阵、向量和基础代数运算。
 - 已完成任务二要求的向量范数、矩阵范数和条件数。
-- 已完成任务三要求的线性方程组、最小二乘、主特征值/特征向量、QR 全部特征值近似和分块矩阵乘法。
+- 已完成任务三要求的线性方程组、最小二乘、主特征值/特征向量、QR 全部特征值近似、分块矩阵乘法和 Strassen 矩阵乘法。
 - 已完成基础数值稳定性优化和 CPU 多线程优化接口。
 - 已开始任务四，实现卷积、Sobel 边缘检测、PGM 输出和基础图像特征统计。
+- 已实现 OpenCL GPU 加速路径，覆盖 `double` 矩阵乘法和 3x3 卷积。
 - 已补全高精度整数和高精度浮点类型。
 - 已提供可直接运行的最终阶段演示主程序。
 
@@ -229,6 +253,8 @@ cmake --build build
 - 支持更多真实图片输入参数，而不是固定读取项目根目录测试图。
 - 增加更多图像特征，如梯度方向直方图和局部纹理统计。
 - 增加更完整的性能基准，比较普通乘法、分块乘法和多线程分块乘法。
+- 复用 OpenCL kernel 对象和缓冲区，降低 GPU 单次调用开销。
+- 增加 `float` GPU 后端和批量图像处理接口。
 - 增加命令行参数读取矩阵文件并执行指定算法。
 - 增加更系统的自动化测试用例。
 - 在报告中补充范数、条件数、最小二乘和 PCA 等内容在人工智能中的应用说明。
@@ -241,6 +267,6 @@ cmake --build build
 - 主特征值为幂迭代近似值；全部特征值为未带位移 QR 迭代近似值。
 - QR 最小二乘当前要求 `row >= col` 且矩阵列满秩。
 - 高精度浮点采用定点小数模型，除法保留位数可配置，默认保留 30 位小数。
-- 分块矩阵乘法提供单线程和多线程接口，尚未实现 Strassen 算法或 GPU 加速。
+- OpenCL GPU 后端当前覆盖 `double` 矩阵乘法和 3x3 卷积，尚未覆盖 QR、消元、高精度数值类型或通用卷积核。
 - 任务四核心算法以灰度矩阵为基础；OpenCV 分支已支持常见图片格式的灰度读取和 PNG 输出。
 - 当前演示程序主要覆盖核心接口，后续仍需要补充自动化测试。

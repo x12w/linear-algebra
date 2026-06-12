@@ -7,5 +7,9 @@ pkgs.mkShell {
     gdb
     pkg-config
     opencv
+    opencl-headers
+    ocl-icd
+    pocl
+    clinfo
   ];
 }

@@ -18,6 +18,7 @@
 ├── CMakeLists.txt
 ├── include
 │   ├── basic_algebra.hpp
+│   ├── gpu_acceleration.hpp
 │   ├── image_processing.hpp
 │   ├── linear_algebra.hpp
 │   └── utils.hpp
@@ -28,6 +29,7 @@
 说明：
 
 - `include/basic_algebra.hpp`：基础代数类型，包括复数、有理数、高精度整数和高精度浮点数。
+- `include/gpu_acceleration.hpp`：可选 OpenCL 矩阵乘法和 3x3 卷积加速。
 - `include/linear_algebra.hpp`：向量、矩阵和线性代数运算。
 - `include/image_processing.hpp`：任务四图像卷积、Sobel 边缘检测和图像特征统计。
 - `include/utils.hpp`：基础动态数组工具类。
@@ -41,11 +43,11 @@ cmake --build build
 ./build/test
 ```
 
-项目使用 C++17，库本身以头文件形式提供，CMake 中定义了 `BasicAlgebra`、`LinearAlgebra`、`ImageProcessing` 和 `Utils` 四个 interface library。
+项目使用 C++17，库本身以头文件形式提供，CMake 中定义了 `BasicAlgebra`、`LinearAlgebra`、`ImageProcessing`、`GPUAcceleration` 和 `Utils` 五个 interface library。
 
 ## Nix 与 Direnv
 
-项目提供 `shell.nix` 和 `.envrc`，用于获得一致的 C++/CMake/OpenCV 开发环境：
+项目提供 `shell.nix` 和 `.envrc`，用于获得一致的 C++/CMake/OpenCV/OpenCL 开发环境：
 
 ```bash
 direnv allow
@@ -60,15 +62,17 @@ cmake --build build-nix
 nix-shell --run 'cmake -S . -B build-nix && cmake --build build-nix'
 ```
 
-OpenCV 在当前阶段作为可选依赖进入环境和 CMake 探测；核心卷积与 PGM 演示使用项目自身的矩阵库实现，保证无 OpenCV 时仍可构建运行。若使用 Nix/direnv 环境构建，演示程序会自动处理项目根目录下的测试 JPG 图片。
+OpenCV 和 OpenCL 在当前阶段作为可选依赖进入环境和 CMake 探测；核心卷积与 PGM 演示使用项目自身的矩阵库实现，保证无 OpenCV/OpenCL 时仍可构建运行。若使用 Nix/direnv 环境构建，演示程序会自动处理项目根目录下的测试 JPG 图片，并启用 OpenCL 加速路径。
 
 ## 命名空间
 
-项目主要使用两个命名空间：
+项目主要使用以下命名空间：
 
 ```cpp
 namespace basic_algebra;
 namespace linear_algebra;
+namespace image_processing;
+namespace gpu_acceleration;
 ```
 
 使用示例：
@@ -264,8 +268,16 @@ std::cout << v.infinity_norm() << std::endl;
 - `dominant_eigenpair(max_iterations, tolerance)`：幂迭代求主特征值和对应特征向量。
 - `eigenvalues_qr(max_iterations, tolerance)`：QR 迭代求实方阵全部特征值近似。
 - `block_multiply(matrix, block_size)`：分块矩阵乘法，用于和普通三重循环矩阵乘法对比。
+- `strassen_multiply(matrix, threshold)`：Strassen 矩阵乘法，自动补零到 2 的幂并在小规模时回退到分块乘法。
 - `parallel_block_multiply(matrix, block_size, thread_count)`：多线程分块矩阵乘法。
 - `parallel_frobenius_norm(thread_count)`：多线程 Frobenius 范数。
+
+GPU 加速接口位于 `gpu_acceleration.hpp`：
+
+- `opencl_compiled()`：当前构建是否启用 OpenCL。
+- `opencl_device_name()`：返回 OpenCL 设备名称。
+- `opencl_matrix_multiply(lhs, rhs)`：OpenCL `double` 矩阵乘法。
+- `opencl_convolve3x3(image, kernel)`：OpenCL `double` 3x3 卷积。
 
 文件接口：
 
@@ -406,6 +418,15 @@ C_ij += A_ik * B_kj
 
 `block_multiply()` 按块遍历矩阵，减少大矩阵乘法中的缓存失效，可与普通 `operator*` 的三重循环结果做一致性和性能对比。
 
+Strassen 矩阵乘法：
+
+```text
+普通矩阵乘法复杂度: O(n^3)
+Strassen 复杂度: O(n^log2(7)) ≈ O(n^2.807)
+```
+
+`strassen_multiply()` 对任意可乘矩阵先补零到 2 的幂，递归使用 7 次子矩阵乘法替代 8 次子矩阵乘法。为了控制递归开销，小规模子问题会回退到分块矩阵乘法。该方法适合中大型稠密矩阵；小矩阵或尺寸补零过多时可能不如分块乘法。
+
 多线程优化：
 
 ```text
@@ -414,6 +435,14 @@ parallel_frobenius_norm() 按行拆分平方和
 ```
 
 多线程接口默认使用 `std::thread::hardware_concurrency()`，也支持手动指定线程数。小矩阵会自动回退到单线程实现，避免线程创建成本超过计算收益。
+
+GPU 加速：
+
+- 已实现可选 OpenCL 后端，当前覆盖 `Matrix<double>` 矩阵乘法和 3x3 图像卷积。
+- OpenCL 构建由 CMake 自动探测；无 OpenCL 时演示会跳过 GPU 路径并继续使用 CPU。
+- Nix 环境提供 OpenCL headers、ICD loader 和 POCL，同时也可使用系统 NVIDIA OpenCL 平台。
+- 首次 GPU 调用会完成 OpenCL 运行时和 program 初始化；后续调用复用 runtime/program，但仍包含 kernel 创建、buffer 分配和数据传输开销，单次小规模运行不一定比 CPU 快。
+- `BigInteger`、`RationalNumber`、`HighPrecisionNumber` 等自定义精确数值类型不适合直接 GPU 化；GPU 后端主要面向 `float/double` 稠密矩阵和图像算子。
 
 ## 任务四图像卷积
 
@@ -474,5 +503,5 @@ output/task4_real_edges.png
 - 主特征值使用幂迭代；全部特征值使用未带位移的 QR 迭代，复杂矩阵可能收敛较慢。
 - QR 最小二乘当前要求 `row >= col` 且矩阵列满秩。
 - `HighPrecisionNumber<>` 使用定点小数模型，除法精度可配置，默认保留 30 位小数。
-- 分块矩阵乘法已提供单线程和多线程接口，但未实现 Strassen 算法或 GPU 加速。
+- OpenCL GPU 后端当前覆盖 `double` 矩阵乘法和 3x3 卷积，尚未覆盖 QR、消元、高精度数值类型或通用卷积核。
 - 任务四核心算法仍以灰度矩阵为基础；OpenCV 分支已支持常见图片格式的灰度读取和 PNG 输出。

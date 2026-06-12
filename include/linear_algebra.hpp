@@ -82,6 +82,14 @@ inline std::size_t normalized_thread_count(std::size_t requested,
   }
   return std::max<std::size_t>(1, std::min(requested, work_items));
 }
+
+inline std::size_t next_power_of_two(std::size_t value) {
+  std::size_t result = 1;
+  while (result < value) {
+    result *= 2;
+  }
+  return result;
+}
 } // namespace detail
 
 template <typename T> class MatrixBase {
@@ -565,6 +573,8 @@ public:
                                      long double tolerance = 1e-10L) const;
   Matrix block_multiply(const Matrix &operand,
                         std::size_t block_size = 32) const;
+  Matrix strassen_multiply(const Matrix &operand,
+                           std::size_t threshold = 64) const;
   Matrix parallel_block_multiply(const Matrix &operand,
                                  std::size_t block_size = 32,
                                  std::size_t thread_count = 0) const;
@@ -609,6 +619,10 @@ public:
   friend std::ostream &operator<<(std::ostream &os, const Matrix<U> &operand);
   template <typename U>
   friend std::istream &operator>>(std::istream &is, Matrix<U> &operand);
+
+private:
+  static Matrix strassen_square(const Matrix &lhs, const Matrix &rhs,
+                                std::size_t threshold);
 };
 
 template <typename T>
@@ -1221,6 +1235,97 @@ auto Matrix<T>::block_multiply(const Matrix &operand,
 }
 
 template <typename T>
+auto Matrix<T>::strassen_multiply(const Matrix &operand,
+                                  std::size_t threshold) const -> Matrix {
+  if (col() != operand.row()) {
+    throw(std::runtime_error("error: Strassen matrix multiplication size "
+                             "mismatch"));
+  }
+  if (row() == 0 || operand.col() == 0 || col() == 0) {
+    return Matrix(row(), operand.col(), 0);
+  }
+  if (threshold == 0) {
+    threshold = 1;
+  }
+
+  std::size_t padded_size =
+      detail::next_power_of_two(std::max({row(), col(), operand.col()}));
+  Matrix left(padded_size, padded_size, 0);
+  Matrix right(padded_size, padded_size, 0);
+  for (std::size_t r = 0; r < row(); r++) {
+    for (std::size_t c = 0; c < col(); c++) {
+      left[r][c] = (*this)[r][c];
+    }
+  }
+  for (std::size_t r = 0; r < operand.row(); r++) {
+    for (std::size_t c = 0; c < operand.col(); c++) {
+      right[r][c] = operand[r][c];
+    }
+  }
+
+  Matrix padded_result = strassen_square(left, right, threshold);
+  Matrix result(row(), operand.col(), 0);
+  for (std::size_t r = 0; r < row(); r++) {
+    for (std::size_t c = 0; c < operand.col(); c++) {
+      result[r][c] = padded_result[r][c];
+    }
+  }
+  return result;
+}
+
+template <typename T>
+auto Matrix<T>::strassen_square(const Matrix &lhs, const Matrix &rhs,
+                                std::size_t threshold) -> Matrix {
+  std::size_t n = lhs.row();
+  if (n <= threshold || n == 1) {
+    return lhs.block_multiply(rhs, 32);
+  }
+
+  std::size_t half = n / 2;
+  Matrix a11(half, half, 0), a12(half, half, 0), a21(half, half, 0),
+      a22(half, half, 0);
+  Matrix b11(half, half, 0), b12(half, half, 0), b21(half, half, 0),
+      b22(half, half, 0);
+
+  for (std::size_t r = 0; r < half; r++) {
+    for (std::size_t c = 0; c < half; c++) {
+      a11[r][c] = lhs[r][c];
+      a12[r][c] = lhs[r][c + half];
+      a21[r][c] = lhs[r + half][c];
+      a22[r][c] = lhs[r + half][c + half];
+      b11[r][c] = rhs[r][c];
+      b12[r][c] = rhs[r][c + half];
+      b21[r][c] = rhs[r + half][c];
+      b22[r][c] = rhs[r + half][c + half];
+    }
+  }
+
+  Matrix m1 = strassen_square(a11 + a22, b11 + b22, threshold);
+  Matrix m2 = strassen_square(a21 + a22, b11, threshold);
+  Matrix m3 = strassen_square(a11, b12 - b22, threshold);
+  Matrix m4 = strassen_square(a22, b21 - b11, threshold);
+  Matrix m5 = strassen_square(a11 + a12, b22, threshold);
+  Matrix m6 = strassen_square(a21 - a11, b11 + b12, threshold);
+  Matrix m7 = strassen_square(a12 - a22, b21 + b22, threshold);
+
+  Matrix c11 = m1 + m4 - m5 + m7;
+  Matrix c12 = m3 + m5;
+  Matrix c21 = m2 + m4;
+  Matrix c22 = m1 - m2 + m3 + m6;
+
+  Matrix result(n, n, 0);
+  for (std::size_t r = 0; r < half; r++) {
+    for (std::size_t c = 0; c < half; c++) {
+      result[r][c] = c11[r][c];
+      result[r][c + half] = c12[r][c];
+      result[r + half][c] = c21[r][c];
+      result[r + half][c + half] = c22[r][c];
+    }
+  }
+  return result;
+}
+
+template <typename T>
 auto Matrix<T>::parallel_block_multiply(const Matrix &operand,
                                         std::size_t block_size,
                                         std::size_t thread_count) const
@@ -1483,12 +1588,15 @@ auto Matrix<T>::operator*(const Matrix &operand) const -> Matrix {
         "matrix's col is equal to the second matrix's row"));
   }
 
-  Matrix res(row(), operand.col());
+  Matrix res(row(), operand.col(), 0);
 
-  for (std::size_t row_index = 0; row_index < res.row(); row_index++) {
-    for (std::size_t col_index = 0; col_index < res.col(); col_index++) {
-      res[row_index][col_index] =
-          (*this)[row_index] * operand.fetch_col(col_index);
+  for (std::size_t row_index = 0; row_index < row(); row_index++) {
+    for (std::size_t inner_index = 0; inner_index < col(); inner_index++) {
+      for (std::size_t col_index = 0; col_index < operand.col();
+           col_index++) {
+        res[row_index][col_index] +=
+            (*this)[row_index][inner_index] * operand[inner_index][col_index];
+      }
     }
   }
 

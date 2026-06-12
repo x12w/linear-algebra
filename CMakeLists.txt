@@ -36,3 +36,6 @@ endif()
 
 add_executable(test src/final_demo.cpp)
 target_link_libraries(test BasicAlgebra LinearAlgebra ImageProcessing GPUAcceleration)
+
+add_executable(menu_demo src/menu_demo.cpp)
+target_link_libraries(menu_demo BasicAlgebra LinearAlgebra ImageProcessing GPUAcceleration)

@@ -60,10 +60,20 @@ private:
 public:
   OpenCLRuntime() {
     cl_uint platform_count = 0;
-    check(clGetPlatformIDs(0, nullptr, &platform_count),
-          "failed to query OpenCL platforms");
+    cl_int platform_status =
+        clGetPlatformIDs(0, nullptr, &platform_count);
+    if (platform_status != CL_SUCCESS) {
+      std::ostringstream oss;
+      oss << "failed to query OpenCL platforms (OpenCL error "
+          << platform_status
+          << "); run the OpenCL demo inside nix-shell or ensure an OpenCL ICD "
+             "vendor is installed";
+      throw(std::runtime_error(oss.str()));
+    }
     if (platform_count == 0) {
-      throw(std::runtime_error("error: no OpenCL platform found"));
+      throw(std::runtime_error(
+          "error: no OpenCL platform found; run inside nix-shell or install an "
+          "OpenCL ICD vendor"));
     }
 
     std::vector<cl_platform_id> platforms(platform_count);
@@ -411,7 +421,10 @@ inline MatrixD opencl_matrix_multiply(const MatrixD &lhs, const MatrixD &rhs) {
 #else
   (void)lhs;
   (void)rhs;
-  throw(std::runtime_error("error: OpenCL backend is not enabled"));
+  throw(std::runtime_error(
+      "error: OpenCL backend is not enabled; configure and run with "
+      "nix-shell --run 'cmake -S . -B build-nix && cmake --build build-nix && "
+      "./build-nix/menu_demo'"));
 #endif
 }
 
@@ -472,7 +485,10 @@ inline MatrixD opencl_convolve3x3(const MatrixD &image,
 #else
   (void)image;
   (void)kernel3x3;
-  throw(std::runtime_error("error: OpenCL backend is not enabled"));
+  throw(std::runtime_error(
+      "error: OpenCL backend is not enabled; configure and run with "
+      "nix-shell --run 'cmake -S . -B build-nix && cmake --build build-nix && "
+      "./build-nix/menu_demo'"));
 #endif
 }
 

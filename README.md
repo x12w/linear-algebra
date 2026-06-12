@@ -1,6 +1,6 @@
 # Linear Algebra
 
-本项目是一个 C++17 线性代数计算库实训项目，目标是实现矩阵、向量、基础数值类型和高精度数值类型，并提供常见线性代数运算接口。项目当前覆盖任务一、任务二和任务三的核心要求，包括矩阵与向量基础运算、行列式、逆矩阵、秩、行最简形、各类范数、条件数、线性方程组求解、最小二乘、主特征值/特征向量和分块矩阵乘法。
+本项目是一个 C++17 线性代数计算库实训项目，目标是实现矩阵、向量、基础数值类型和高精度数值类型，并提供常见线性代数运算接口。项目当前覆盖任务一到任务四的核心要求，包括矩阵与向量基础运算、行列式、逆矩阵、秩、行最简形、各类范数、条件数、线性方程组求解、最小二乘、主特征值/特征向量、分块矩阵乘法、Strassen 矩阵乘法、图像卷积和图像特征分析。
 
 ## 项目目标
 
@@ -8,7 +8,9 @@
 - 支持实数、复数、有理数、高精度整数和高精度浮点数等不同数值类型。
 - 提供矩阵和向量的基础代数运算。
 - 提供任务二要求的向量范数、矩阵范数和条件数计算。
-- 提供任务三要求的方阵线性方程组求解、非方阵最小二乘、主特征值/特征向量和分块矩阵乘法。
+- 提供任务三要求的方阵线性方程组求解、非方阵最小二乘、主特征值/特征向量、分块矩阵乘法和 Strassen 矩阵乘法。
+- 提供任务四要求的卷积、Sobel 边缘检测、图像特征统计和 PGM/OpenCV 图像读写。
+- 提供菜单演示、样例数据、多线程优化和可选 OpenCL GPU 加速对比。
 - 对维度不匹配、非方阵求行列式/逆矩阵、奇异矩阵求逆等非法操作抛出异常。
 
 ## 目录结构
@@ -22,7 +24,16 @@
 │   ├── image_processing.hpp
 │   ├── linear_algebra.hpp
 │   └── utils.hpp
+├── data
+│   ├── eigen_matrix.txt
+│   ├── least_squares_A.txt
+│   ├── linear_system_A.txt
+│   ├── matrix_a.txt
+│   ├── perf_matrix_a.txt
+│   ├── sample_image.pgm
+│   └── vector_a.txt
 └── src
+    ├── menu_demo.cpp
     └── final_demo.cpp
 ```
 
@@ -34,6 +45,8 @@
 - `include/image_processing.hpp`：任务四图像卷积、Sobel 边缘检测和图像特征统计。
 - `include/utils.hpp`：基础动态数组工具类。
 - `src/final_demo.cpp`：最终阶段演示程序，用于展示主要接口效果。
+- `src/menu_demo.cpp`：交互式菜单演示程序，可用数字选择展示操作。
+- `data/`：菜单演示所需的矩阵、向量和 PGM 图像样例数据。
 
 ## 构建与运行
 
@@ -41,9 +54,39 @@
 cmake -S . -B build
 cmake --build build
 ./build/test
+./build/menu_demo
 ```
 
 项目使用 C++17，库本身以头文件形式提供，CMake 中定义了 `BasicAlgebra`、`LinearAlgebra`、`ImageProcessing`、`GPUAcceleration` 和 `Utils` 五个 interface library。
+
+交互式演示程序 `menu_demo` 支持数字菜单：
+
+```text
+1. 向量运算
+2. 矩阵基础运算
+3. 线性方程组求解
+4. 最小二乘拟合
+5. 范数、条件数和特征值
+6. 矩阵乘法性能对比
+7. 图像卷积和边缘特征分析
+8. 基础数值类型演示
+9. 优化前后计算用时对比
+0. 退出
+```
+
+`menu_demo` 会自动定位项目根目录下的 `data/`，因此既可以在项目根目录运行 `./build/menu_demo`，也可以进入 `build/` 后运行 `./menu_demo`。
+
+菜单演示默认读取 `data/` 下的样例文件：
+
+- `vector_a.txt`、`vector_b.txt`：三维向量，用于加减、点积、叉积和范数。
+- `matrix_a.txt`、`matrix_b.txt`：3x3 矩阵，用于矩阵加减乘、转置、行列式和逆矩阵。
+- `linear_system_A.txt`、`linear_system_b.txt`：线性方程组 `Ax=b`。
+- `least_squares_A.txt`、`least_squares_b.txt`：直线拟合最小二乘样例。
+- `eigen_matrix.txt`：对称矩阵，用于范数、条件数和特征值展示。
+- `perf_matrix_a.txt`、`perf_matrix_b.txt`：矩阵乘法性能对比样例。
+- `sample_image.pgm`：ASCII PGM 灰度图，用于卷积、Sobel 边缘检测和特征统计。
+
+第 9 项会自动生成 512x512 确定性矩阵，并对比优化前列向量临时构造乘法、优化后 `operator*`、分块乘法、Strassen、多线程分块乘法和可选 OpenCL 后端的计算用时。OpenCL 路径会先做一次同规模预热，正式计时不包含首次 runtime/program 初始化。
 
 ## Nix 与 Direnv
 
@@ -63,6 +106,14 @@ nix-shell --run 'cmake -S . -B build-nix && cmake --build build-nix'
 ```
 
 OpenCV 和 OpenCL 在当前阶段作为可选依赖进入环境和 CMake 探测；核心卷积与 PGM 演示使用项目自身的矩阵库实现，保证无 OpenCV/OpenCL 时仍可构建运行。若使用 Nix/direnv 环境构建，演示程序会自动处理项目根目录下的测试 JPG 图片，并启用 OpenCL 加速路径。
+
+OpenCL 后端必须使用启用了 OpenCL 的构建产物。普通 `build/` 如果是在系统缺少 OpenCL headers/loader 时配置的，会显示 `OpenCL backend is not enabled`。推荐直接运行：
+
+```bash
+nix-shell --run 'cmake -S . -B build-nix && cmake --build build-nix && ./build-nix/menu_demo'
+```
+
+如果单独执行 `./build-nix/menu_demo` 仍出现 `failed to query OpenCL platforms`，说明当前 shell 没有可用的 OpenCL ICD 平台；请在 `nix-shell --run` 或 `direnv allow` 后的环境中运行。
 
 ## 命名空间
 

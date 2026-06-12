@@ -1,4 +1,12 @@
 build
+build-nix
 compile_commands.json
 test.cpp
 .cache
+output
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tif
+*.tiff

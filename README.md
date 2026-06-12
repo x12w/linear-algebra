@@ -18,6 +18,7 @@
 ├── CMakeLists.txt
 ├── include
 │   ├── basic_algebra.hpp
+│   ├── image_processing.hpp
 │   ├── linear_algebra.hpp
 │   └── utils.hpp
 └── src
@@ -28,6 +29,7 @@
 
 - `include/basic_algebra.hpp`：基础代数类型，包括复数、有理数、高精度整数和高精度浮点数。
 - `include/linear_algebra.hpp`：向量、矩阵和线性代数运算。
+- `include/image_processing.hpp`：任务四图像卷积、Sobel 边缘检测和图像特征统计。
 - `include/utils.hpp`：基础动态数组工具类。
 - `src/final_demo.cpp`：最终阶段演示程序，用于展示主要接口效果。
 
@@ -39,7 +41,26 @@ cmake --build build
 ./build/test
 ```
 
-项目使用 C++17，库本身以头文件形式提供，CMake 中定义了 `BasicAlgebra`、`LinearAlgebra` 和 `Utils` 三个 interface library。
+项目使用 C++17，库本身以头文件形式提供，CMake 中定义了 `BasicAlgebra`、`LinearAlgebra`、`ImageProcessing` 和 `Utils` 四个 interface library。
+
+## Nix 与 Direnv
+
+项目提供 `shell.nix` 和 `.envrc`，用于获得一致的 C++/CMake/OpenCV 开发环境：
+
+```bash
+direnv allow
+cmake -S . -B build-nix
+cmake --build build-nix
+./build-nix/test
+```
+
+也可以直接使用：
+
+```bash
+nix-shell --run 'cmake -S . -B build-nix && cmake --build build-nix'
+```
+
+OpenCV 在当前阶段作为可选依赖进入环境和 CMake 探测；核心卷积与 PGM 演示使用项目自身的矩阵库实现，保证无 OpenCV 时仍可构建运行。若使用 Nix/direnv 环境构建，演示程序会自动处理项目根目录下的测试 JPG 图片。
 
 ## 命名空间
 
@@ -394,6 +415,42 @@ parallel_frobenius_norm() 按行拆分平方和
 
 多线程接口默认使用 `std::thread::hardware_concurrency()`，也支持手动指定线程数。小矩阵会自动回退到单线程实现，避免线程创建成本超过计算收益。
 
+## 任务四图像卷积
+
+`image_processing.hpp` 将灰度图像表示为 `Matrix<double>`，并提供：
+
+- `convolve2d(image, kernel)`：二维卷积，边界使用 clamp 策略。
+- `gaussian_kernel_3x3()`：3x3 高斯平滑核。
+- `sobel_x_kernel()` / `sobel_y_kernel()`：Sobel 水平和垂直梯度核。
+- `sobel_edges(image)`：高斯平滑后计算 Sobel 梯度幅值。
+- `threshold(image, threshold)`：二值化边缘图。
+- `normalize_to_byte_range(image)`：归一化到 0-255。
+- `analyze_features(image, edge_threshold)`：统计最小值、最大值、均值、方差和边缘密度。
+- `save_pgm(image, path)` / `load_pgm(path)`：ASCII PGM 图像读写。
+- `load_grayscale_image(path)` / `save_grayscale_image(image, path)`：OpenCV 可用时支持 JPG/PNG 等常见格式，否则回退到 PGM。
+
+最终演示会生成合成灰度图，并输出：
+
+```text
+output/task4_original.pgm
+output/task4_blur.pgm
+output/task4_sobel.pgm
+output/task4_edges.pgm
+```
+
+这些文件可用常见图像查看器或 OpenCV/Python 读取，用于报告展示卷积、平滑、边缘检测和特征统计结果。
+
+如果项目根目录存在 `istockphoto-184276818-612x612.jpg` 且当前构建启用了 OpenCV，演示还会输出真实图片处理结果：
+
+```text
+output/task4_real_gray.png
+output/task4_real_blur.png
+output/task4_real_sobel.png
+output/task4_real_edges.png
+```
+
+当前测试图像的真实图片分析会打印尺寸、Sobel 边缘均值、方差和边缘密度。
+
 ## 异常处理
 
 以下情况会抛出异常：
@@ -405,6 +462,8 @@ parallel_frobenius_norm() 按行拆分平方和
 - 最小二乘右端向量维度不匹配。
 - 非方阵求特征值。
 - 分块矩阵乘法中块大小为 0。
+- 卷积核为空或卷积核尺寸不是奇数。
+- PGM 文件打开失败或格式不合法。
 - 除数为 0。
 - p-范数中 `p < 1`。
 - 文件读取或写入失败。
@@ -416,3 +475,4 @@ parallel_frobenius_norm() 按行拆分平方和
 - QR 最小二乘当前要求 `row >= col` 且矩阵列满秩。
 - `HighPrecisionNumber<>` 使用定点小数模型，除法精度可配置，默认保留 30 位小数。
 - 分块矩阵乘法已提供单线程和多线程接口，但未实现 Strassen 算法或 GPU 加速。
+- 任务四核心算法仍以灰度矩阵为基础；OpenCV 分支已支持常见图片格式的灰度读取和 PNG 输出。

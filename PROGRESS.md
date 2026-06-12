@@ -14,6 +14,7 @@
 
 - `include/basic_algebra.hpp`：基础数值类型。
 - `include/linear_algebra.hpp`：向量、矩阵及线性代数算法。
+- `include/image_processing.hpp`：任务四图像卷积、Sobel 边缘检测和特征统计。
 - `include/utils.hpp`：底层动态数组工具。
 - `src/final_demo.cpp`：最终阶段演示主程序。
 - `demo/main.cpp`：中期汇报演示主程序。
@@ -24,8 +25,11 @@ CMake 已配置 interface library：
 - `Utils`
 - `BasicAlgebra`
 - `LinearAlgebra`
+- `ImageProcessing`
 
 并提供 `test` 可执行目标用于演示。
+
+项目已增加 `shell.nix` 和 `.envrc`，可通过 `direnv allow` 或 `nix-shell` 获得 CMake、GCC、pkg-config 和 OpenCV 开发环境。OpenCV 当前作为可选依赖探测，核心图像卷积演示不依赖 OpenCV 即可运行；在 Nix/OpenCV 环境下可读取项目根目录中的 JPG 测试图片并输出 PNG 处理结果。
 
 ### 2. 基础代数类型
 
@@ -144,7 +148,23 @@ cond(A) = ||A|| * ||A^{-1}||
 - 新增多线程分块矩阵乘法，按结果矩阵行块拆分任务，避免线程写冲突。
 - 新增多线程 Frobenius 范数，按行拆分平方和后合并。
 
-### 8. 异常处理
+### 8. 任务四卷积与图像特征分析
+
+已新增 `image_processing.hpp`，将灰度图像表示为 `Matrix<double>`，实现：
+
+- `convolve2d(image, kernel)`：二维卷积。
+- `gaussian_kernel_3x3()`：高斯模糊核。
+- `sobel_x_kernel()` / `sobel_y_kernel()`：Sobel 梯度核。
+- `sobel_edges(image)`：Sobel 边缘强度图。
+- `threshold(image, threshold)`：边缘二值化。
+- `normalize_to_byte_range(image)`：归一化到 0-255。
+- `analyze_features(image, edge_threshold)`：统计最小值、最大值、均值、方差和边缘密度。
+- `save_pgm(image, path)` / `load_pgm(path)`：ASCII PGM 图像读写。
+- `load_grayscale_image(path)` / `save_grayscale_image(image, path)`：OpenCV 可用时支持 JPG/PNG 等常见图片格式。
+
+`src/final_demo.cpp` 已增加任务四演示：生成 32x32 合成灰度图，输出原图、高斯模糊图、Sobel 边缘强度图和二值边缘图到 `output/` 目录，并打印边缘均值、方差和边缘密度。若 OpenCV 可用且项目根目录存在 `istockphoto-184276818-612x612.jpg`，还会读取真实图片并输出灰度图、模糊图、Sobel 图和二值边缘 PNG。
+
+### 9. 异常处理
 
 已在主要非法操作中加入异常处理：
 
@@ -156,6 +176,8 @@ cond(A) = ||A|| * ||A^{-1}||
 - 最小二乘右端向量维度不匹配时抛出异常。
 - 非方阵求特征值时抛出异常。
 - 分块矩阵乘法块大小为 0 时抛出异常。
+- 卷积核为空或卷积核尺寸不是奇数时抛出异常。
+- PGM 文件打开失败或格式不合法时抛出异常。
 - p-范数中 `p < 1` 时抛出异常。
 - 高精度数值除以 0 时抛出异常。
 - 文件打开失败时抛出异常。
@@ -174,6 +196,7 @@ cond(A) = ||A|| * ||A^{-1}||
 8. 普通矩阵乘法与分块矩阵乘法对比。
 9. 多线程分块矩阵乘法与多线程 Frobenius 范数。
 10. 高精度整数和高精度浮点运算。
+11. 任务四卷积、Sobel 边缘检测和图像特征统计。
 
 运行方式：
 
@@ -192,6 +215,7 @@ cmake --build build
 - 已完成任务二要求的向量范数、矩阵范数和条件数。
 - 已完成任务三要求的线性方程组、最小二乘、主特征值/特征向量、QR 全部特征值近似和分块矩阵乘法。
 - 已完成基础数值稳定性优化和 CPU 多线程优化接口。
+- 已开始任务四，实现卷积、Sobel 边缘检测、PGM 输出和基础图像特征统计。
 - 已补全高精度整数和高精度浮点类型。
 - 已提供可直接运行的最终阶段演示主程序。
 
@@ -202,6 +226,8 @@ cmake --build build
 - 实现 SVD 或 PCA 降维演示。
 - 实现多项式最小二乘拟合并输出 RMSE。
 - 增加带位移 QR 算法，提升全部特征值求解的收敛速度。
+- 支持更多真实图片输入参数，而不是固定读取项目根目录测试图。
+- 增加更多图像特征，如梯度方向直方图和局部纹理统计。
 - 增加更完整的性能基准，比较普通乘法、分块乘法和多线程分块乘法。
 - 增加命令行参数读取矩阵文件并执行指定算法。
 - 增加更系统的自动化测试用例。
@@ -216,4 +242,5 @@ cmake --build build
 - QR 最小二乘当前要求 `row >= col` 且矩阵列满秩。
 - 高精度浮点采用定点小数模型，除法保留位数可配置，默认保留 30 位小数。
 - 分块矩阵乘法提供单线程和多线程接口，尚未实现 Strassen 算法或 GPU 加速。
+- 任务四核心算法以灰度矩阵为基础；OpenCV 分支已支持常见图片格式的灰度读取和 PNG 输出。
 - 当前演示程序主要覆盖核心接口，后续仍需要补充自动化测试。

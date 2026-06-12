@@ -1,10 +1,13 @@
 #include <basic_algebra.hpp>
 #include <chrono>
+#include <filesystem>
 #include <iomanip>
+#include <image_processing.hpp>
 #include <iostream>
 #include <linear_algebra.hpp>
 
 using namespace basic_algebra;
+using namespace image_processing;
 using namespace linear_algebra;
 
 int main() {
@@ -136,6 +139,60 @@ int main() {
             << HighPrecisionNumber<>::default_division_precision() << '\n';
   std::cout << "HighPrecision 1/7: "
             << HighPrecisionNumber<>(1LL) / HighPrecisionNumber<>(7LL) << '\n';
+
+  std::filesystem::create_directories("output");
+  Image image(32, 32, 20.0);
+  for (std::size_t r = 8; r < 24; r++) {
+    for (std::size_t c = 8; c < 24; c++) {
+      image[r][c] = 220.0;
+    }
+  }
+  for (std::size_t i = 0; i < 32; i++) {
+    image[i][i] = 255.0;
+  }
+
+  Image blurred = convolve2d(image, gaussian_kernel_3x3());
+  Image edge_strength = normalize_to_byte_range(sobel_edges(image));
+  Image edge_map = threshold(edge_strength, 80.0);
+  ImageFeatures features = analyze_features(edge_strength, 80.0);
+
+  save_pgm(image, "output/task4_original.pgm");
+  save_pgm(blurred, "output/task4_blur.pgm");
+  save_pgm(edge_strength, "output/task4_sobel.pgm");
+  save_pgm(edge_map, "output/task4_edges.pgm");
+
+  std::cout << "\nTask 4 convolution and image feature analysis:\n";
+  std::cout << "Sobel edge mean: " << features.mean << '\n';
+  std::cout << "Sobel edge variance: " << features.variance << '\n';
+  std::cout << "Sobel edge density: " << features.edge_density << '\n';
+  std::cout << "Generated PGM files under output/\n";
+
+  const std::string sample_image_path = "istockphoto-184276818-612x612.jpg";
+  if (std::filesystem::exists(sample_image_path) && opencv_available()) {
+    Image real_image = load_grayscale_image(sample_image_path);
+    Image real_blur = convolve2d(real_image, gaussian_kernel_3x3());
+    Image real_sobel = normalize_to_byte_range(sobel_edges(real_image));
+    Image real_edges = threshold(real_sobel, 80.0);
+    ImageFeatures real_features = analyze_features(real_sobel, 80.0);
+
+    save_grayscale_image(real_image, "output/task4_real_gray.png");
+    save_grayscale_image(real_blur, "output/task4_real_blur.png");
+    save_grayscale_image(real_sobel, "output/task4_real_sobel.png");
+    save_grayscale_image(real_edges, "output/task4_real_edges.png");
+
+    std::cout << "Real image: " << sample_image_path << '\n';
+    std::cout << "Real image size: " << real_image.row() << " x "
+              << real_image.col() << '\n';
+    std::cout << "Real Sobel edge mean: " << real_features.mean << '\n';
+    std::cout << "Real Sobel edge variance: " << real_features.variance
+              << '\n';
+    std::cout << "Real Sobel edge density: " << real_features.edge_density
+              << '\n';
+    std::cout << "Generated real-image PNG files under output/\n";
+  } else if (std::filesystem::exists(sample_image_path)) {
+    std::cout << "OpenCV is not available in this build; skipped real JPG "
+                 "image analysis.\n";
+  }
 
   return 0;
 }
